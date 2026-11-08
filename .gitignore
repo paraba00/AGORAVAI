@@ -1,0 +1,5 @@
+# Impede versionar configurações e dados reais.
+.env
+data/
+__pycache__/
+*.pyc
