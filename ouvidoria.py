@@ -5,6 +5,7 @@ Requer Python 3.10 ou superior. Não requer instalar bibliotecas.
 Executar o sistema:          python ouvidoria.py
 Ver a demonstração:          python ouvidoria.py --demo
 Gerar arquivo de parâmetros: python ouvidoria.py --configurar
+Testar configuração SMTP:    python ouvidoria.py --testar-smtp
 Ver estas instruções:        python ouvidoria.py --ajuda
 
 Depois de executar, abra http://localhost:8000 no navegador.
@@ -1052,13 +1053,16 @@ Foram aprovados os testes automatizados do servidor e a verificação de sintaxe
 ROOT = Path(__file__).parent  # Localiza a pasta do projeto.
 config = ROOT / '.env'  # Localiza as configurações privadas ao lado deste arquivo.
 if config.exists():  # Carrega parâmetros somente se o arquivo foi criado pelo responsável.
-    for line in config.read_text(encoding='utf-8').splitlines():  # Percorre as configurações.
+    for line in config.read_text(encoding='utf-8-sig').splitlines():  # Percorre as configurações.
         line = line.strip()  # Remove espaços externos.
         if not line or line.startswith('#'):  # Ignora linhas vazias e comentários.
             continue
         key, separator, value = line.partition('=')  # Separa o nome e o valor da configuração.
         if separator:  # Aceita linhas no formato NOME=valor.
-            os.environ.setdefault(key.strip(), value.strip())  # Respeita as variáveis já definidas no sistema.
+            value = value.strip()  # Remove espaços externos sem alterar a senha internamente.
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):  # Aceita valores entre aspas no .env.
+                value = value[1:-1]  # Retira somente as aspas que envolvem o valor inteiro.
+            os.environ.setdefault(key.strip(), value)  # Respeita as variáveis já definidas no sistema.
 DB = Path(os.getenv('DATABASE_PATH', str(ROOT / 'data' / 'ouvidoria.sqlite3')))  # Banco fora da pasta pública.
 APP_URL = os.getenv('APP_URL', 'http://localhost:8000').rstrip('/')  # Origem permitida.
 DIRECTOR = os.getenv('DIRECTOR_EMAIL', '').strip().lower()  # Somente uma conta recebe o perfil diretor.
@@ -1105,16 +1109,80 @@ def role(email):
     return 'supervisor' if email in SUPERVISORS else 'aluno'  # Os demais são alunos por padrão.
 
 
+class SMTPConfigurationError(ValueError):
+    pass  # Identifica erros locais de configuração sem incluir senhas na mensagem.
+
+
+def smtp_settings():
+    required = ['SMTP_HOST', 'SMTP_FROM']  # Define os campos obrigatórios para qualquer envio.
+    if os.getenv('SMTP_USER', '').strip():  # A senha só é necessária quando existe usuário de autenticação.
+        required.append('SMTP_PASSWORD')
+    missing = [name for name in required if not os.getenv(name, '').strip()]  # Verifica nomes, sem imprimir valores.
+    if missing:
+        location = 'Confira o .env na mesma pasta de ouvidoria.py e reinicie o programa.' if config.exists() else 'Não encontrei o arquivo .env ao lado de ouvidoria.py. Confira se ele não ficou como .env.txt.'  # Orienta onde corrigir.
+        raise SMTPConfigurationError('Configuração SMTP incompleta: ' + ', '.join(missing) + '. ' + location)  # Mostra apenas nomes de campos.
+    try:
+        port = int(os.getenv('SMTP_PORT', '587'))  # Valida a porta antes de tentar conexão.
+        if not 1 <= port <= 65535:
+            raise ValueError  # Recusa números fora da faixa de portas.
+    except ValueError:
+        raise SMTPConfigurationError('SMTP_PORT precisa ser uma porta válida. No Gmail, use 587 com STARTTLS ou 465 com TLS.') from None
+    host = os.environ['SMTP_HOST'].strip()  # Remove espaços no nome do servidor.
+    if '://' in host or '/' in host or ':' in host or any(c.isspace() for c in host):
+        raise SMTPConfigurationError('SMTP_HOST deve conter somente o servidor. No Gmail, use smtp.gmail.com, sem https:// e sem porta.')
+    return host, port  # Retorna somente os parâmetros necessários à conexão.
+
+
+def smtp_error_message(error):
+    if isinstance(error, SMTPConfigurationError):
+        return str(error)  # Os textos dessa classe são criados pelo próprio programa e nunca incluem valores privados.
+    if isinstance(error, smtplib.SMTPAuthenticationError):
+        return 'O servidor recusou o usuário ou a senha SMTP. No Gmail, use uma senha de app do Google, não a senha normal. Confira SMTP_USER e reinicie após editar o .env.'
+    if isinstance(error, smtplib.SMTPRecipientsRefused):
+        return 'O servidor recusou o destinatário. Confira o e-mail institucional e as regras de envio da conta.'
+    if isinstance(error, smtplib.SMTPSenderRefused):
+        return 'O servidor recusou o remetente. No Gmail, SMTP_FROM deve ser o mesmo Gmail de SMTP_USER ou um endereço autorizado na conta.'
+    if isinstance(error, smtplib.SMTPNotSupportedError):
+        return 'O servidor não oferece a conexão segura exigida. Confira SMTP_HOST e SMTP_PORT; no Gmail, use smtp.gmail.com e porta 587 ou 465.'
+    if isinstance(error, ssl.SSLError):
+        return 'Não foi possível validar a conexão TLS do SMTP. Confira a porta, a data do computador e os certificados; não desative a validação de segurança.'
+    if isinstance(error, smtplib.SMTPException):
+        return 'O provedor de e-mail recusou ou interrompeu o envio. Execute python ouvidoria.py --testar-smtp para verificar a conexão e a autenticação.'
+    if isinstance(error, OSError):
+        return 'Não foi possível conectar ao servidor SMTP. Confira internet, firewall, SMTP_HOST e SMTP_PORT. No Gmail, tente a porta 587 ou 465.'
+    return 'Não foi possível enviar o código. Execute python ouvidoria.py --testar-smtp no terminal para verificar a configuração.'  # Não repassa respostas brutas que possam conter dados privados.
+
+
+@contextmanager  # Fecha a conexão mesmo quando autenticação ou envio falhar.
+def smtp_connection():
+    host, port = smtp_settings()  # Valida os parâmetros sem revelar credenciais.
+    context = ssl.create_default_context()  # Exige certificados confiáveis.
+    client = smtplib.SMTP_SSL(host, port, timeout=15, context=context) if port == 465 else smtplib.SMTP(host, port, timeout=15)  # Suporta TLS direto ou STARTTLS.
+    try:
+        if port != 465:
+            client.starttls(context=context)  # Exige criptografia antes de transmitir credenciais.
+        username = os.getenv('SMTP_USER', '').strip()  # Normaliza o usuário da conta de envio.
+        if username:
+            password = os.environ['SMTP_PASSWORD']  # Mantém a senha apenas na memória do processo.
+            if host.lower() == 'smtp.gmail.com':
+                password = password.replace(' ', '')  # Aceita a senha de app do Google copiada com espaços entre os grupos.
+            client.login(username, password)  # Autentica sem registrar a senha nem habilitar logs de protocolo.
+        yield client  # Disponibiliza a conexão autenticada para envio ou diagnóstico.
+    finally:
+        try:
+            client.quit()  # Encerra a conexão educadamente.
+        except (smtplib.SMTPException, OSError):
+            client.close()  # Garante liberação caso o servidor já tenha desconectado.
+
+
 def deliver(email, code):
+    smtp_settings()  # Valida a presença do remetente antes de montar o e-mail.
     message = EmailMessage()  # Cria uma mensagem de texto.
     message['Subject'] = 'Seu código de acesso — Ouvidoria Campo Real'  # Define o assunto.
-    message['From'] = os.environ['SMTP_FROM']  # Usa o remetente configurado pela faculdade.
+    message['From'] = os.environ['SMTP_FROM'].strip()  # Usa o remetente configurado, sem espaços externos.
     message['To'] = email  # Envia somente ao e-mail institucional validado.
     message.set_content(f'Seu código de acesso é {code}. Ele expira em 10 minutos. Não compartilhe este código. Se não solicitou, ignore esta mensagem.')  # Informa validade.
-    with smtplib.SMTP(os.environ['SMTP_HOST'], int(os.getenv('SMTP_PORT', '587')), timeout=15) as smtp:  # Conecta ao SMTP.
-        smtp.starttls(context=ssl.create_default_context())  # Exige TLS com certificado válido.
-        if os.getenv('SMTP_USER'):  # Autentica quando o servidor exigir.
-            smtp.login(os.environ['SMTP_USER'], os.environ['SMTP_PASSWORD'])  # Usa credenciais do ambiente.
+    with smtp_connection() as smtp:  # Usa a mesma conexão segura validada pelo diagnóstico.
         smtp.send_message(message)  # Entrega o código sem registrá-lo em logs.
 
 
@@ -1243,8 +1311,8 @@ class Handler(BaseHTTPRequestHandler):
                         code = f'{secrets.randbelow(1000000):06d}'  # Gera seis números aleatórios.
                         try:
                             deliver(email, code)  # Só permite autenticação por e-mail realmente recebido.
-                        except Exception:
-                            raise Error(503, 'Envio indisponível. A faculdade precisa configurar o SMTP no servidor.')
+                        except Exception as error:
+                            raise Error(503, smtp_error_message(error)) from None  # Informa a categoria da falha sem expor credenciais ou respostas brutas do SMTP.
                         db.execute('INSERT OR REPLACE INTO codes VALUES (?,?,?,0,?)', (email, digest(email + code), now + 600, now))  # Guarda código com validade de dez minutos.
                         return self.success(db, 200, {'ok': True})  # Não devolve o código no HTTP.
                     supplied = self.text(data, 'code', 6, 6)  # Lê o código digitado.
@@ -1320,6 +1388,18 @@ if __name__ == '__main__':
         if option in ('--ajuda', '--help', '-h'):  # Disponibiliza instruções sem conexão externa.
             print(__doc__)  # Mostra a ajuda incluída no início do programa.
             raise SystemExit(0)  # Finaliza normalmente.
+        if option == '--testar-smtp':  # Testa a configuração sem enviar e-mails nem criar códigos de acesso.
+            try:
+                with smtp_connection() as smtp:  # Verifica conexão, TLS e autenticação quando configurada.
+                    status, _ = smtp.noop()  # Consulta se a sessão SMTP está ativa, sem remeter uma mensagem.
+                    if status != 250:
+                        raise smtplib.SMTPResponseException(status, b'Falha na verificacao SMTP')  # Não imprime a resposta bruta do provedor.
+            except Exception as error:
+                print('Falha no teste SMTP:', smtp_error_message(error))  # Mostra somente uma orientação segura para compartilhar.
+                raise SystemExit(1) from None  # Sinaliza falha sem despejar rastreamento nem credenciais.
+            print('Conexão SMTP segura concluída' + (' e autenticação aceita.' if os.getenv('SMTP_USER', '').strip() else '; autenticação não configurada.'))  # Distingue conexão de autenticação efetiva.
+            print('Nenhum e-mail foi enviado. Este teste não confirma entrega ao destinatário nem permissão do remetente.')  # Explica o alcance exato do diagnóstico.
+            raise SystemExit(0)  # Finaliza o teste sem iniciar o servidor.
         if option == '--configurar':  # Cria o modelo de configuração sem sobrescrever credenciais existentes.
             target = ROOT / '.env.example'  # Define o nome do modelo.
             if not target.exists():  # Preserva modelos que já tenham sido editados.
@@ -1334,7 +1414,7 @@ if __name__ == '__main__':
             print('Demonstração fictícia salva em:', target)  # Informa a localização caso o navegador não abra.
             webbrowser.open(target.resolve().as_uri())  # Abre a página local para explorar os perfis.
             raise SystemExit(0)  # Não cria sessão, banco ou acesso de produção.
-        raise SystemExit('Opção desconhecida. Use --ajuda, --demo ou --configurar.')  # Rejeita argumentos digitados por engano.
+        raise SystemExit('Opção desconhecida. Use --ajuda, --demo, --configurar ou --testar-smtp.')  # Rejeita argumentos digitados por engano.
     if not os.getenv('SMTP_HOST') or not os.getenv('SMTP_FROM'):  # Informa a configuração pendente antes do primeiro acesso.
         print('Para login real, configure SMTP: python ouvidoria.py --configurar')  # Explica por que um código não seria enviado.
         print('Para explorar com dados fictícios: python ouvidoria.py --demo')  # Oferece um modo de apresentação separado.
