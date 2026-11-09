@@ -82,3 +82,17 @@ python -m unittest discover -s tests -v
 Os testes usam banco temporário e substituem somente o envio SMTP. Verificam domínio exato, autenticação, tentativas e validade dos códigos, uso único, isolamento entre alunos, proteção da autoria anônima, acesso e auditoria do diretor, respostas, solução/reabertura, origem HTTP, CSRF, proteção dos arquivos privados e logout.
 
 O arquivo único também passou pela verificação de entrega dos conteúdos embutidos. O envio SMTP real depende das configurações da faculdade. As telas ainda precisam de conferência visual em computador e celular antes da publicação.
+
+## Diagnosticar problemas de envio
+
+Execute na pasta do programa:
+
+```sh
+python ouvidoria.py --testar-smtp
+```
+
+O comando valida configuração, conexão segura e autenticação quando houver usuário configurado. Não envia e-mails, não imprime senhas e não comprova a entrega de uma mensagem. O site também distingue configuração ausente, autenticação recusada e falha de conexão.
+
+Para Gmail pessoal, use `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, e seu endereço Gmail em `SMTP_FROM` e `SMTP_USER`. Em `SMTP_PASSWORD`, use a senha de app gerada pelo Google após ativar a verificação em duas etapas, se o recurso estiver disponível na conta. Nunca coloque a senha normal do Gmail nem publique o `.env`. A porta 465 também é aceita, com TLS direto; outras portas usam STARTTLS obrigatório.
+
+O `.env` deve estar ao lado de `ouvidoria.py`, sem extensão `.txt`. Valores podem estar entre aspas; arquivos UTF-8 com BOM são aceitos. Após editar, pare o programa com Ctrl+C e execute-o novamente.
