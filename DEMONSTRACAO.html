@@ -206,6 +206,9 @@ dialog::backdrop { background:#052c46a6; }
 /* Mantém a proporção da segunda versão da marca. */
 .footer-brand img { object-fit:contain; }
 
+/* Facilita encontrar os atalhos da conta abaixo do botão principal. */
+#toggleRegister,#forgotPassword { display:block; text-align:left; margin-top:8px; }
+
 </style> <!-- Carrega as cores e o layout. -->
  <!-- Executa as interações depois de carregar o HTML. -->
 </head>
@@ -219,12 +222,15 @@ dialog::backdrop { background:#052c46a6; }
 <main id="inicio"> <!-- Agrupa o conteúdo principal. -->
 <section id="welcome" class="welcome"> <!-- Apresenta o canal de escuta. -->
 <div class="intro"><span class="eyebrow light">OUVIDORIA CAMPO REAL</span><h1>Sua voz faz<br>parte da mudança<span>.</span></h1><p>Um espaço para ouvir você, acolher suas ideias e construir uma faculdade cada vez melhor.</p><div class="intro-points"><span>✓ Escuta com respeito</span><span>✓ Acompanhamento por protocolo</span></div><div class="intro-bottom"><span class="small-star" aria-hidden="true">✦</span><p>Reclamações, críticas, sugestões e elogios.<br><strong>Toda manifestação importa.</strong></p></div></div> <!-- Explica a proposta do atendimento. -->
-<div class="login-card"><span class="step-label">SEU ESPAÇO DE ESCUTA</span><h2>Vamos conversar?</h2><p>Entre com seu e-mail institucional para enviar ou acompanhar uma manifestação.</p>
-<form id="loginForm"> <!-- Solicita e confirma a identidade institucional. -->
-<label for="email">E-mail institucional</label><input id="email" type="email" required maxlength="254" autocomplete="email"> <!-- Recebe o endereço do aluno ou da equipe. -->
-<div id="codeField" hidden><label for="code">Código recebido por e-mail</label><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6 dígitos"></div> <!-- Exibe a verificação após o envio. -->
-<button id="loginButton" class="button primary" type="submit">Receber código de acesso <span aria-hidden="true">→</span></button> <!-- Inicia a autenticação. -->
-<button id="changeEmail" type="button" class="text-button" hidden>Trocar e-mail / solicitar novo código</button> <!-- Permite corrigir o endereço. -->
+<div class="login-card"><span class="step-label">SEU ESPAÇO DE ESCUTA</span><h2>Vamos conversar?</h2><p>Entre com seu e-mail institucional e senha. No primeiro acesso, crie sua conta de aluno.</p>
+<form id="loginForm"> <!-- Acesso direto com e-mail e senha, sem serviço de envio. -->
+<label for="email">E-mail institucional</label><input id="email" type="email" required maxlength="254" autocomplete="username"> <!-- Mantém o campo vazio e exige endereço institucional. -->
+<label for="password">Senha</label><input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"> <!-- Não exibe a senha digitada. -->
+<div id="confirmField" hidden><label for="confirmPassword">Confirmar senha</label><input id="confirmPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password"></div> <!-- Confere a senha antes de cadastrar. -->
+<button id="loginButton" class="button primary" type="submit">Entrar →</button> <!-- Envia o acesso ao servidor Python. -->
+<button id="toggleRegister" type="button" class="text-button">Primeiro acesso? Criar conta de aluno</button> <!-- Permite cadastro sem escolher permissões administrativas. -->
+<button id="forgotPassword" type="button" class="text-button">Esqueci minha senha</button> <!-- Orienta recuperação pelo responsável, sem SMTP. -->
+<p id="authHint" class="form-note">Use seu e-mail @camporeal.edu.br. O cadastro verifica o domínio, mas não comprova a titularidade do e-mail.</p> <!-- Explica o limite do modelo escolhido. -->
 </form>
 <div id="demoAccounts" class="demo-accounts" hidden><p>Explore os perfis fictícios:</p><button type="button" data-demo="aluno">Aluno</button><button type="button" data-demo="supervisor">Supervisor</button><button type="button" data-demo="diretor">Diretor</button></div> <!-- Oferece perfis apenas no arquivo de demonstração. -->
 <div class="privacy-note"><span aria-hidden="true">◈</span><p><strong>Você escolhe como se identificar.</strong><br>Na opção anônima, sua identidade fica oculta para a equipe de atendimento e pode ser consultada somente pelo diretor. O login continua obrigatório.</p></div> <!-- Explica o limite do anonimato antes do acesso. -->
@@ -260,7 +266,7 @@ const $ = id => document.getElementById(id); // Facilita localizar elementos pel
 const DEMO = location.protocol === 'file:'; // Ativa o demonstrador somente quando o arquivo é aberto diretamente.
 const statuses = ['Recebida', 'Em análise', 'Respondida', 'Resolvida']; // Define a ordem das situações.
 const demoEmails = {aluno:'aluno.exemplo@camporeal.edu.br',supervisor:'supervisor.exemplo@camporeal.edu.br',diretor:'diretor.exemplo@camporeal.edu.br'}; // Contas fictícias, sem validade no servidor.
-let user = null, tickets = [], activeId = null, codeSent = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
+let user = null, tickets = [], activeId = null, registerMode = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); // Impede que relatos sejam interpretados como HTML.
 const date = value => new Date(value * 1000).toLocaleString('pt-BR', {timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}); // Mostra datas no horário de Brasília.
 const badge = status => `<span class="badge ${['','analysis','answered','solved'][statuses.indexOf(status)] || ''}">${escapeHTML(status)}</span>`; // Gera o marcador de situação.
@@ -319,7 +325,7 @@ async function api(path, data) { // Centraliza a comunicação com o servidor re
   return result; // Entrega os dados autorizados.
 }
 function loggedOut() { // Restaura a apresentação pública.
-  user = null; tickets = []; activeId = null; // Descarta dados privados da memória da tela.
+  user = null; tickets = []; activeId = null; resetLogin(); // Descarta dados privados da memória da tela.
   $('workspace').hidden = true; $('welcome').hidden = false; $('how').hidden = false; // Mostra a entrada.
   $('account').replaceChildren(); $('ticketList').replaceChildren(); $('detailContent').replaceChildren(); // Limpa os dados exibidos.
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); // Fecha janelas privadas.
@@ -374,25 +380,29 @@ function action(label, handler) { // Cria um botão de ação sem eventos HTML e
 async function updateStatus(status) { // Solicita a alteração autorizada de situação.
   await api('/api/status', {id:activeId,status}); await refresh(); showDetail(activeId); notify('Situação atualizada.'); // Recarrega o estado confirmado pelo servidor.
 }
-$('loginForm').onsubmit = event => { // Trata envio do e-mail ou do código.
+function setRegisterMode(enabled) { // Alterna entre entrar e criar conta, sem segunda etapa por e-mail.
+  registerMode = enabled; $('confirmField').hidden = !enabled; $('confirmPassword').required = enabled; // Solicita confirmação somente no cadastro.
+  $('password').autocomplete = enabled ? 'new-password' : 'current-password'; // Ajuda o gerenciador de senhas do navegador.
+  $('loginButton').textContent = enabled ? 'Criar minha conta →' : 'Entrar →'; // Explica exatamente o que o botão fará.
+  $('toggleRegister').textContent = enabled ? 'Já tenho conta. Entrar' : 'Primeiro acesso? Criar conta de aluno'; // Oferece retorno à tela de entrada.
+  $('forgotPassword').hidden = enabled; $('password').value = ''; $('confirmPassword').value = ''; // Limpa senhas ao trocar a operação.
+}
+$('loginForm').onsubmit = event => { // Faz cadastro ou acesso com e-mail e senha.
   event.preventDefault(); // Evita recarregar a página.
-  busy($('loginButton'), async () => { // Mostra o estado de espera.
-    const email = $('email').value.trim().toLowerCase(); // Normaliza o endereço.
-    if (!/^[^\s@]+@camporeal\.edu\.br$/.test(email)) throw new Error('Use seu e-mail @camporeal.edu.br.'); // Ajuda o usuário antes da validação definitiva no servidor.
-    if (DEMO) { user = {email,role:'aluno'}; await loggedIn(); return; } // No arquivo local, todo e-mail digitado é apenas um aluno fictício.
-    if (!codeSent) { // Solicita o código na primeira etapa.
-      await api('/api/login', {email}); codeSent = true; $('codeField').hidden = false; $('code').required = true; $('email').readOnly = true; $('loginButton').textContent = 'Entrar na ouvidoria →'; $('changeEmail').hidden = false; $('code').focus(); // Prepara a confirmação do e-mail.
-      notify('Código enviado ao e-mail institucional. Ele vale por 10 minutos.'); // Informa o próximo passo.
-    } else { // Confirma o código recebido.
-      await api('/api/verify', {email,code:$('code').value.trim()}); user = await api('/api/me'); await loggedIn(); // Inicia a sessão real somente após validação.
-      resetLogin(); // Limpa os campos usados no acesso.
-    }
+  busy($('loginButton'), async () => { // Impede cliques repetidos durante a autenticação.
+    const email = $('email').value.trim().toLowerCase(); const password = $('password').value; // Preserva os caracteres da senha, inclusive espaços.
+    if (!/^[^\s@]+@camporeal\.edu\.br$/.test(email)) throw new Error('Use seu e-mail @camporeal.edu.br.'); // Oferece validação imediata do domínio.
+    if (registerMode && password !== $('confirmPassword').value) throw new Error('As senhas precisam ser iguais.'); // Evita cadastrar uma senha digitada incorretamente.
+    if (DEMO) { user = {email,role:'aluno'}; await loggedIn(); resetLogin(); return; } // No demonstrador, toda conta digitada continua fictícia.
+    await api(registerMode ? '/api/register' : '/api/login', {email,password}); // O servidor define o perfil e verifica a senha.
+    user = await api('/api/me'); await loggedIn(); resetLogin(); // Entra direto após o cadastro ou a senha correta.
   });
 };
-function resetLogin() { // Restaura a primeira etapa da autenticação.
-  codeSent = false; $('codeField').hidden = true; $('code').required = false; $('email').readOnly = false; $('changeEmail').hidden = true; $('loginButton').textContent = 'Receber código de acesso →'; $('loginForm').reset(); // Descarta código e e-mail da tela.
+function resetLogin() { // Remove as credenciais da tela depois do acesso.
+  $('loginForm').reset(); setRegisterMode(false); // Volta ao modo padrão de entrada.
 }
-$('changeEmail').onclick = resetLogin; // Permite voltar à etapa inicial e reenviar após o intervalo.
+$('toggleRegister').onclick = () => setRegisterMode(!registerMode); // Permite criar somente contas de aluno pelo site.
+$('forgotPassword').onclick = () => notify('Peça ao responsável pela instalação para redefinir sua senha pelo menu python ouvidoria.py --contas.'); // Não usa links ou códigos de recuperação por e-mail.
 $('newTicket').onclick = () => { $('ticketForm').reset(); $('composeDialog').showModal(); }; // Abre um formulário limpo.
 $('ticketForm').onsubmit = event => { // Envia uma manifestação.
   event.preventDefault(); // Preserva a navegação atual.
@@ -410,7 +420,7 @@ $('search').oninput = renderList; $('statusFilter').onchange = renderList; // Re
 $('allTab').onclick = () => { $('search').value = ''; $('statusFilter').value = ''; renderList(); }; // Restaura todos os protocolos.
 document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => $(button.dataset.close).close()); // Liga os botões de fechar às janelas.
 if (DEMO) { // Configura somente o arquivo de demonstração.
-  $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; // Identifica claramente a simulação.
+  $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; $('password').required = false; // Identifica claramente a simulação.
   document.querySelectorAll('[data-demo]').forEach(button => button.onclick = () => busy(button, async () => {user = {email:demoEmails[button.dataset.demo],role:button.dataset.demo}; await loggedIn();})); // Permite explorar os três perfis fictícios.
 } else { // Ao abrir pelo servidor, tenta recuperar uma sessão já validada.
   api('/api/me').then(async result => {user = result; await loggedIn();}).catch(error => { if (error.message && !error.message.includes('Entre com') && !error.message.includes('expirou')) notify(error.message, true); }); // Mostra a entrada se não houver sessão.
