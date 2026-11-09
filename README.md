@@ -1,77 +1,101 @@
-# Ouvidoria Campo Real — Python
+# Ouvidoria Campo Real — login simples
 
-Projeto em **Python 3.10 ou superior**, com banco SQLite e código comentado. O arquivo `ouvidoria.py` contém o servidor, os controles de acesso e os conteúdos das telas. Não precisa instalar bibliotecas adicionais.
+Projeto em **Python 3.10 ou superior**, com código comentado e banco SQLite. Não precisa instalar bibliotecas, configurar Gmail, SMTP ou receber códigos por e-mail.
 
-O campo de e-mail inicia **vazio**, sem texto de exemplo. O acesso real continua restrito a e-mails `@camporeal.edu.br`, com confirmação por código enviado ao endereço informado.
+## Baixar e abrir
 
-## Como baixar pelo GitHub
+No GitHub, clique em **Code → Download ZIP** e extraia a pasta. Abra o terminal nessa pasta e execute:
 
-- Para o projeto inteiro: clique no botão verde **Code** e em **Download ZIP**, depois extraia a pasta.
-- Para apenas o programa: abra **ouvidoria.py**, clique em **Download raw file** na barra do arquivo e salve no computador.
-- Se o navegador bloquear arquivos `.py`, baixe **ouvidoria-python.txt** e renomeie para **ouvidoria.py**. O conteúdo é idêntico.
+```sh
+python ouvidoria.py
+```
 
-## Ver a demonstração
+No Windows, se necessário, use `py -3 ouvidoria.py`. Depois, abra **http://localhost:8000** no navegador. Para parar o programa, use **Ctrl+C**.
 
-Abra `DEMONSTRACAO.html` com dois cliques. Ou, no terminal da pasta onde salvou o programa, execute:
+O arquivo `ouvidoria.py` já contém o servidor e os conteúdos das telas. A cópia `ouvidoria-python.txt` tem o mesmo conteúdo; pode ser renomeada para `.py` caso o download dessa extensão seja bloqueado.
+
+## Alunos: criar conta e entrar
+
+1. Na tela de acesso, clique em **Primeiro acesso? Criar conta de aluno**.
+2. Digite um e-mail `@camporeal.edu.br`.
+3. Escolha uma senha de **8 a 128 caracteres** e repita para confirmar.
+4. Clique em **Criar minha conta**. O acesso acontece imediatamente.
+5. Nas próximas visitas, use apenas e-mail e senha e clique em **Entrar**.
+
+O campo de e-mail começa vazio, sem texto de exemplo. O cadastro público é sempre de **aluno**; não existe escolha de perfil administrativo no site.
+
+**O domínio institucional é conferido, mas o sistema não comprova que a pessoa é dona do e-mail.** Esse é o limite da opção sem verificação por mensagem. Não use a informação como identidade institucional verificada.
+
+## Criar supervisor e diretor
+
+No computador em que o programa está instalado, pare o servidor com **Ctrl+C** e execute:
+
+```sh
+python ouvidoria.py --contas
+```
+
+O menu oferece:
+
+- **1 — Criar conta:** informe e-mail institucional, escolha aluno, supervisor ou diretor e defina a senha duas vezes. A senha não aparece enquanto é digitada; isso é normal.
+- **2 — Redefinir senha:** informe uma conta existente e uma nova senha. As sessões anteriores dessa conta serão encerradas.
+- **3 — Listar contas:** mostra apenas os e-mails e os perfis, nunca senhas.
+- **0 — Sair:** fecha o menu.
+
+Depois, inicie novamente com `python ouvidoria.py`.
+
+Crie as contas de equipe por esse menu, antes de tentar cadastrá-las no site. Existe somente **um diretor** no banco. O perfil é atribuído localmente; conhecer o e-mail da direção não permite receber privilégios por cadastro público. Não há senha padrão ou código mestre.
+
+## Esqueci a senha
+
+O aluno deve pedir ao responsável pela instalação para usar a opção **Redefinir senha** no menu `--contas`. Não há recuperação automática por e-mail e não é possível consultar a senha antiga, pois ela não é armazenada em texto simples.
+
+## Atualizar uma instalação anterior
+
+1. Pare o programa.
+2. Faça uma cópia privada da pasta `data` com o serviço parado.
+3. Substitua `ouvidoria.py` pela versão nova, **na mesma pasta**, mantendo `data`.
+4. Execute `python ouvidoria.py --contas` e crie as contas necessárias, com os mesmos e-mails de quem já tem relatos.
+5. Inicie o servidor novamente.
+
+A primeira execução cria as tabelas de contas e encerra sessões/códigos antigos. **Os relatos, as respostas e a auditoria são preservados.** E-mails que já têm histórico da versão antiga não podem ser tomados pelo cadastro público: o responsável precisa criar a conta no menu local. A migração não repete o encerramento de sessões a cada reinício.
+
+O `.env` antigo pode continuar na pasta, mas as opções SMTP não são usadas. `DIRECTOR_EMAIL` e `SUPERVISOR_EMAILS`, quando existentes, apenas reservam os antigos endereços contra cadastro público; não concedem perfis automaticamente. Crie as contas no menu local.
+
+## Permissões e atendimento
+
+- **Aluno:** cria reclamação, crítica, sugestão, elogio ou solicitação; consulta somente os próprios protocolos; lê respostas; envia complementos; confirma solução ou pede nova análise.
+- **Supervisor:** atende e responde à fila, sem receber a autoria dos relatos anônimos.
+- **Diretor:** atende como a equipe e pode consultar explicitamente a autoria anônima. Cada consulta fica registrada na tabela `audit`.
+
+As situações são **Recebida**, **Em análise**, **Respondida** e **Resolvida**. O aluno confirma a solução; a equipe não encerra por ele. Respostas e mudanças de situação ficam no histórico. O aluno acompanha pelo painel, sem notificações automáticas por e-mail.
+
+**Anonimato significa identidade oculta para o atendimento, com consulta pelo diretor na aplicação.** O cadastro e o login continuam obrigatórios. Se a pessoa escrever nome ou e-mail no relato, esse texto ficará visível. Quem administra o computador ou o banco também pode acessar os arquivos; restrinja o acesso à infraestrutura.
+
+## Demonstração sem contas reais
+
+Abra `DEMONSTRACAO.html` com dois cliques ou execute:
 
 ```sh
 python ouvidoria.py --demo
 ```
 
-No Windows, você também pode usar `py -3` no lugar de `python`.
+Os botões de aluno, supervisor e diretor usam dados fictícios armazenados no navegador. Não coloque informações pessoais na demonstração. O demonstrador não representa a segurança da API real.
 
-O demonstrador tem perfis de aluno, supervisor e diretor, com relatos fictícios. Os dados ficam no navegador: **não use informações pessoais na demonstração**. Ela não substitui a autenticação e as permissões do servidor real.
+## Configuração opcional
 
-## Executar o sistema real
+O programa funciona localmente sem `.env`. Se precisar mudar endereço ou porta, gere o modelo com `python ouvidoria.py --configurar`, copie `.env.example` para `.env` e ajuste os valores. Não é necessário preencher parâmetros de e-mail.
 
-1. Instale Python 3.10 ou superior.
-2. Gere o modelo com `python ouvidoria.py --configurar`.
-3. Copie `.env.example` para `.env`, na mesma pasta de `ouvidoria.py`.
-4. Configure envio de e-mail e contas autorizadas no `.env`.
-5. Execute `python ouvidoria.py`.
-6. Abra **http://localhost:8000** no navegador. Use exatamente o endereço definido em `APP_URL`.
+O banco fica em `data/ouvidoria.sqlite3`. Não publique `.env` nem `data` no GitHub; ambos estão no `.gitignore`. Não mude `DATABASE_PATH` se quiser continuar usando o banco atual.
 
-O banco será criado em `data/ouvidoria.sqlite3`. O servidor permanece em execução enquanto o terminal estiver aberto. Para parar, use `Ctrl+C`.
+As senhas usam PBKDF2-HMAC-SHA256, com sal aleatório e 600 mil iterações. Os cookies de sessão são HttpOnly, SameSite e Secure quando o endereço usa HTTPS. Alterações exigem token CSRF e origem compatível com `APP_URL`. Há limites de tentativas por conta e IP. O menu de contas é local, não uma rota pública do site.
 
-### Configurações para login real
-
-| Parâmetro | Uso |
-| --- | --- |
-| `DIRECTOR_EMAIL` | Uma única conta institucional do diretor. |
-| `SUPERVISOR_EMAILS` | Contas dos supervisores/administradores, separadas por vírgula. |
-| `SMTP_HOST` | Servidor de envio fornecido pela TI da faculdade. |
-| `SMTP_PORT` | Porta com STARTTLS, normalmente 587. |
-| `SMTP_FROM` | Endereço remetente autorizado. |
-| `SMTP_USER` e `SMTP_PASSWORD` | Credenciais de envio, quando exigidas pelo SMTP. |
-| `APP_URL` | Endereço exato usado no navegador, sem barra ao final. |
-
-Guarde as credenciais apenas no `.env`, excluído pelo `.gitignore`. Não envie esse arquivo nem o banco ao GitHub. O envio usa STARTTLS obrigatório. Provedores que exigem OAuth para SMTP precisam de integração própria ou relay autorizado pela TI.
-
-O código de acesso vence em dez minutos, é de uso único e bloqueia após cinco erros. A sessão dura oito horas. Sem SMTP configurado, não há desvio de login nem código mestre. Foi usada a alternativa de verificação por e-mail institucional; login com Google não foi implementado.
-
-## Perfis e atendimento
-
-- **Aluno:** registra reclamações, críticas, sugestões, elogios e solicitações; consulta somente os próprios protocolos; lê respostas; complementa relatos; confirma solução ou pede nova análise.
-- **Supervisor/administrador:** consulta a fila e responde. Não recebe a autoria de relatos anônimos.
-- **Diretor:** atende como a equipe e pode consultar explicitamente a autoria anônima. Cada consulta fica na tabela `audit` do servidor.
-
-A manifestação começa como **Recebida**, passa para **Em análise** e fica **Respondida** quando a equipe envia uma mensagem. O aluno marca **Resolvida** ou pede nova análise. O histórico permanece disponível. Não há notificações automáticas de novas respostas por e-mail; o aluno acompanha pelo painel.
-
-**Anonimato significa identidade oculta para a equipe, com consulta exclusiva do diretor pela aplicação.** O login é obrigatório. O formulário explica isso antes do envio. Se o aluno escrever o nome no relato, o conteúdo continuará visível. Pessoas com acesso administrativo ao servidor ou ao arquivo do banco também podem acessar os dados; restrinja essas permissões na infraestrutura.
-
-Os perfis são definidos no servidor. O aluno não escolhe tornar-se supervisor ou diretor. Mudanças de configuração exigem reiniciar o programa.
+Para uso na faculdade, a TI precisa instalar o programa em servidor persistente e colocar um proxy reverso HTTPS à frente dele. O servidor HTTP da biblioteca padrão foi escolhido para simplificar a instalação e deve ficar atrás desse proxy. Ajuste limites por IP para redes compartilhadas e proxy, pois o programa considera a conexão direta e não confia em `X-Forwarded-For`. Defina privacidade, retenção e backups antes de coletar relatos reais.
 
 ## Telas e marcas
 
-HTML, CSS e JavaScript são os conteúdos que o navegador recebe para desenhar e operar as telas. Estão embutidos de forma legível no arquivo Python, no dicionário `ASSETS`. O servidor, a autenticação, a autorização e o banco são implementados em Python.
+HTML, CSS e JavaScript são os conteúdos recebidos pelo navegador e estão embutidos no dicionário `ASSETS`, dentro do Python. O servidor, a autenticação, as permissões e o banco são implementados em Python.
 
-As cores são azul e branco, com amarelo nos detalhes. As marcas incluídas são **reproduções vetoriais de referência baseadas nas imagens fornecidas**, não os arquivos originais. Antes da publicação oficial, substitua os conteúdos `assets/logo-azul.svg` e `assets/logo-branca.svg` no dicionário `ASSETS`. O demonstrador tem cópias embutidas que precisam ser atualizadas separadamente.
-
-## Instalação na faculdade
-
-A TI precisa hospedar o programa em um servidor persistente, configurar SMTP e colocar um proxy HTTPS à frente dele. O servidor HTTP da biblioteca padrão foi escolhido pela simplicidade e não deve ser exposto diretamente à internet. Mantenha `HOST=127.0.0.1` quando o proxy estiver no mesmo computador e ajuste `APP_URL` ao endereço institucional.
-
-O programa considera o IP da conexão direta nos limites de acesso e não confia em `X-Forwarded-For`. Ajuste essa política para proxy ou redes compartilhadas. Defina política de privacidade, retenção e backups privados antes de coletar relatos reais. Com o serviço parado, copie o arquivo SQLite para realizar um backup simples.
+As marcas são reproduções vetoriais de referência das imagens fornecidas, não os arquivos originais. Antes da publicação oficial, substitua os SVGs azul e branco em `ASSETS`. O demonstrador contém cópias próprias que também precisam ser atualizadas.
 
 ## Testes
 
@@ -79,20 +103,4 @@ O programa considera o IP da conexão direta nos limites de acesso e não confia
 python -m unittest discover -s tests -v
 ```
 
-Os testes usam banco temporário e substituem somente o envio SMTP. Verificam domínio exato, autenticação, tentativas e validade dos códigos, uso único, isolamento entre alunos, proteção da autoria anônima, acesso e auditoria do diretor, respostas, solução/reabertura, origem HTTP, CSRF, proteção dos arquivos privados e logout.
-
-O arquivo único também passou pela verificação de entrega dos conteúdos embutidos. O envio SMTP real depende das configurações da faculdade. As telas ainda precisam de conferência visual em computador e celular antes da publicação.
-
-## Diagnosticar problemas de envio
-
-Execute na pasta do programa:
-
-```sh
-python ouvidoria.py --testar-smtp
-```
-
-O comando valida configuração, conexão segura e autenticação quando houver usuário configurado. Não envia e-mails, não imprime senhas e não comprova a entrega de uma mensagem. O site também distingue configuração ausente, autenticação recusada e falha de conexão.
-
-Para Gmail pessoal, use `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, e seu endereço Gmail em `SMTP_FROM` e `SMTP_USER`. Em `SMTP_PASSWORD`, use a senha de app gerada pelo Google após ativar a verificação em duas etapas, se o recurso estiver disponível na conta. Nunca coloque a senha normal do Gmail nem publique o `.env`. A porta 465 também é aceita, com TLS direto; outras portas usam STARTTLS obrigatório.
-
-O `.env` deve estar ao lado de `ouvidoria.py`, sem extensão `.txt`. Valores podem estar entre aspas; arquivos UTF-8 com BOM são aceitos. Após editar, pare o programa com Ctrl+C e execute-o novamente.
+Os testes usam banco temporário e verificam cadastro/login sem SMTP, domínio institucional, senha incorreta, bloqueio de tentativas, hashes, perfis, diretor único, recuperação local, migração, isolamento dos protocolos, autoria restrita, auditoria, respostas, solução/reabertura, CSRF e logout. As telas precisam de conferência visual em computador e celular antes da publicação.
