@@ -17,9 +17,10 @@ class SecurityTests(unittest.TestCase):
         server.DB = Path(cls.temp.name) / 'data' / 'test.sqlite3'  # Define um banco temporário.
         server.DIRECTOR = 'diretor@camporeal.edu.br'  # Define o único diretor do teste.
         server.SUPERVISORS = {'supervisor@camporeal.edu.br'}  # Define a equipe autorizada.
-        cls.codes = {}  # Captura códigos no lugar de enviar mensagens reais.
-        server.deliver = lambda email, code: cls.codes.update({email: code})  # Substitui apenas a integração SMTP.
-        server.initialize()  # Cria o banco com a mesma estrutura da aplicação.
+        server.initialize()  # Cria as tabelas e migra a autenticação antiga.
+        with server.database() as db:
+            server.insert_account(db, 'diretor@camporeal.edu.br', 'SenhaTeste123!', 'diretor')  # Cria a direção pelo mecanismo local.
+            server.insert_account(db, 'supervisor@camporeal.edu.br', 'SenhaTeste123!', 'supervisor')  # Cria a equipe sem cadastro público privilegiado.
         cls.http = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)  # Usa uma porta livre.
         cls.port = cls.http.server_port  # Guarda a porta escolhida.
         server.APP_URL = f'http://localhost:{cls.port}'  # Define a origem permitida para as chamadas.
@@ -47,22 +48,28 @@ class SecurityTests(unittest.TestCase):
         return status, result, cookie  # Retorna as informações para as asserções.
 
     def login(self, email):
-        self.assertEqual(self.request('/api/login', {'email': email})[0], 200)  # Confirma o envio do código.
-        status, _, cookie = self.request('/api/verify', {'email': email, 'code': self.codes[email]})  # Confirma o código capturado.
-        self.assertEqual(status, 200)  # Exige autenticação bem-sucedida.
-        status, profile, _ = self.request('/api/me', session={'cookie': cookie, 'csrf': ''})  # Consulta a sessão recém-criada.
-        self.assertEqual(status, 200)  # Verifica que a sessão pode ser usada.
-        return {**profile, 'cookie': cookie}  # Entrega a conta autenticada.
+        with server.database() as db:
+            exists = db.execute('SELECT 1 FROM accounts WHERE email=?', (email,)).fetchone()  # Decide entre cadastro público e acesso.
+        path = '/api/login' if exists else '/api/register'  # O aluno entra diretamente depois de criar a conta.
+        status, _, cookie = self.request(path, {'email': email, 'password': 'SenhaTeste123!'})
+        self.assertIn(status, (200, 201))  # Exige uma sessão criada após verificação da senha.
+        status, profile, _ = self.request('/api/me', session={'cookie': cookie, 'csrf': ''})
+        self.assertEqual(status, 200)  # A consulta confirma o perfil atribuído pelo servidor.
+        return {**profile, 'cookie': cookie}
 
     def test_01_authentication_and_domain(self):
-        self.assertEqual(self.request('/api/tickets')[0], 401)  # Visitantes não podem ler protocolos.
+        self.assertEqual(self.request('/api/tickets')[0], 401)  # Visitantes continuam sem acesso.
         for email in ['pessoa@gmail.com', 'a@camporeal.edu.br.evil.com', 'a@sub.camporeal.edu.br']:
-            self.assertEqual(self.request('/api/login', {'email': email})[0], 400)  # Rejeita domínios externos ou parecidos.
-        email = 'codigo@camporeal.edu.br'  # Define uma conta exclusiva para a verificação.
-        self.request('/api/login', {'email': email})  # Gera um código real no fluxo da aplicação.
-        wrong = '000000' if self.codes[email] != '000000' else '111111'  # Garante um código diferente do válido.
-        for _ in range(5): self.assertEqual(self.request('/api/verify', {'email': email, 'code': wrong})[0], 400)  # Confere o bloqueio progressivo.
-        self.assertEqual(self.request('/api/verify', {'email': email, 'code': self.codes[email]})[0], 400)  # Bloqueia até o código correto após cinco falhas.
+            self.assertEqual(self.request('/api/register', {'email': email, 'password': 'SenhaTeste123!'})[0], 400)
+        self.assertEqual(self.request('/api/register', {'email': 'novo@camporeal.edu.br', 'password': 'curta'})[0], 400)  # Rejeita senhas insuficientes.
+        self.assertEqual(self.request('/api/login', {'email': 'diretor@camporeal.edu.br', 'password': 'Incorreta123'})[0], 401)  # Conhecer o e-mail do diretor não basta.
+        status, _, cookie = self.request('/api/register', {'email': 'novo@camporeal.edu.br', 'password': 'SenhaTeste123!', 'role': 'diretor'})  # Tenta escolher um perfil privilegiado.
+        self.assertEqual(status, 201)
+        self.assertEqual(self.request('/api/me', session={'cookie': cookie, 'csrf': ''})[1]['role'], 'aluno')  # O servidor ignora o perfil enviado.
+        self.assertEqual(self.request('/api/register', {'email': 'diretor@camporeal.edu.br', 'password': 'SenhaTeste123!'})[0], 409)  # Não sobrescreve equipe existente.
+        for _ in range(15):
+            result = self.request('/api/login', {'email': 'limite@camporeal.edu.br', 'password': 'Incorreta123'})
+        self.assertEqual(self.request('/api/login', {'email': 'limite@camporeal.edu.br', 'password': 'Incorreta123'})[0], 429)  # Limita adivinhação de senha.
 
     def test_02_roles_privacy_and_workflow(self):
         alice = self.login('alice@camporeal.edu.br')  # Autentica a autora do protocolo.
@@ -97,13 +104,26 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(self.request('/api/logout', {}, alice)[0], 200)  # Encerra a sessão.
         self.assertEqual(self.request('/api/me', session=alice)[0], 401)  # O cookie antigo deixa de funcionar.
 
-    def test_03_expiration_and_single_use(self):
-        account = self.login('unico@camporeal.edu.br')  # Autentica com um código novo.
-        self.assertEqual(self.request('/api/verify', {'email': account['email'], 'code': self.codes[account['email']]})[0], 400)  # Não permite reutilizar o código.
-        email = 'expirado@camporeal.edu.br'  # Define uma segunda conta.
-        self.request('/api/login', {'email': email})  # Solicita um código.
-        with server.database() as db: db.execute('UPDATE codes SET expires=0 WHERE email=?', (email,))  # Simula expiração.
-        self.assertEqual(self.request('/api/verify', {'email': email, 'code': self.codes[email]})[0], 400)  # Rejeita código vencido.
+    def test_03_password_storage_and_session_expiration(self):
+        account = self.login('expirado@camporeal.edu.br')  # Cria uma conta nova.
+        with server.database() as db:
+            saved = db.execute('SELECT * FROM accounts WHERE email=?', (account['email'],)).fetchone()
+            self.assertNotEqual(saved['hash'], 'SenhaTeste123!')  # Nunca persiste a senha em texto simples.
+            self.assertEqual(saved['hash'], server.password_hash('SenhaTeste123!', saved['salt']))  # Confere derivação do hash com sal.
+            db.execute('UPDATE sessions SET expires=0 WHERE email=?', (account['email'],))  # Simula sessão vencida.
+        self.assertEqual(self.request('/api/me', session=account)[0], 401)
+        self.assertEqual(self.request('/api/verify', {'email': account['email'], 'code': '123456'})[0], 401)  # A rota de código antigo não autentica.
+
+    def test_04_legacy_email_cannot_be_claimed_publicly(self):
+        email = 'historico@camporeal.edu.br'  # Representa quem usou o antigo login por código.
+        with server.database() as db:
+            db.execute('INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)', ('CR-HISTORICO', email, 1, 'Crítica', 'Registro anterior', 'Geral', 'Este relato pertence a uma conta antiga.', 'Recebida', 1))
+        self.assertEqual(self.request('/api/register', {'email': email, 'password': 'SenhaTeste123!'})[0], 409)  # Um visitante não pode reivindicar esse histórico.
+        with server.database() as db:
+            server.insert_account(db, email, 'SenhaTeste123!', 'aluno')  # O responsável provisiona a conta preservada pelo mecanismo local.
+        account = self.login(email)
+        rows = self.request('/api/tickets', session=account)[1]
+        self.assertEqual(rows[0]['id'], 'CR-HISTORICO')  # O histórico é recuperado sem copiar ou apagar registros.
 
 
 if __name__ == '__main__':
