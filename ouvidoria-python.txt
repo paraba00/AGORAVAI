@@ -1,23 +1,13 @@
-"""OUVIDORIA CAMPO REAL — PROJETO EM UM ÚNICO ARQUIVO PYTHON
-
-Requer Python 3.10 ou superior. Não requer instalar bibliotecas.
-
-Executar o sistema:          python ouvidoria.py
-Ver a demonstração:          python ouvidoria.py --demo
-Gerar arquivo de parâmetros: python ouvidoria.py --configurar
-Testar configuração SMTP:    python ouvidoria.py --testar-smtp
-Ver estas instruções:        python ouvidoria.py --ajuda
-
-Depois de executar, abra http://localhost:8000 no navegador.
-Para login real, configure o envio SMTP e as contas autorizadas no .env.
-O servidor, o banco, o login e as permissões são implementados em Python.
-HTML, CSS e JavaScript são os conteúdos entregues por Python ao navegador.
-Todo o conteúdo está embutido neste arquivo, de forma legível e comentada.
-
-Anonimato: supervisores não recebem a identidade; somente o diretor pode
-consultá-la, com auditoria. O login institucional continua obrigatório.
-As logos são reproduções vetoriais de referência, conforme o guia anterior.
-A demonstração é fictícia e não deve receber dados reais.
+"""OUVIDORIA CAMPO REAL — ACESSO SIMPLES COM E-MAIL E SENHA
+Requer Python 3.10 ou superior; nenhuma biblioteca extra.
+Iniciar: python ouvidoria.py
+Gerenciar contas ou redefinir senhas: python ouvidoria.py --contas
+Demonstração fictícia: python ouvidoria.py --demo
+Endereço padrão: http://localhost:8000
+Não é necessário configurar SMTP, Gmail ou arquivo .env.
+O cadastro público é sempre de aluno. Supervisor e diretor são criados no menu local.
+O domínio institucional é conferido; a titularidade do e-mail não é comprovada.
+Contas com histórico da versão antiga devem ser criadas pelo responsável no menu local.
 """
 import hashlib  # Calcula hashes dos códigos e das sessões.
 import hmac  # Compara hashes sem revelar diferenças de tempo.
@@ -25,27 +15,26 @@ import json  # Converte dados entre JSON e objetos Python.
 import os  # Lê configurações do ambiente.
 import re  # Valida o endereço institucional completo.
 import secrets  # Gera códigos, protocolos e sessões imprevisíveis.
-import smtplib  # Envia os códigos de acesso por e-mail.
 import sqlite3  # Persiste os registros em banco de dados local.
-import ssl  # Protege a conexão com o servidor de e-mail.
 import time  # Controla expiração e limites de acesso.
 from contextlib import contextmanager  # Garante fechamento das conexões ao banco.
-from email.message import EmailMessage  # Monta o e-mail de autenticação.
 from http.cookies import SimpleCookie  # Interpreta o cookie de sessão.
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # Atende HTTP.
 from pathlib import Path  # Trabalha com caminhos de arquivos.
 from urllib.parse import urlparse  # Separa o caminho da URL.
 
 
-# Os arquivos abaixo ficam dentro do próprio programa Python.
+import getpass  # Lê senhas no terminal sem exibir os caracteres.
+
+# Conteúdos do navegador embutidos no programa Python.
 ASSETS = {
-    # Conteúdo de app.js; mantém os comentários para facilitar o estudo.
+    # Conteúdo comentado de app.js.
     'app.js': r''''use strict'; // Evita variáveis criadas por engano.
 const $ = id => document.getElementById(id); // Facilita localizar elementos pelo identificador.
 const DEMO = location.protocol === 'file:'; // Ativa o demonstrador somente quando o arquivo é aberto diretamente.
 const statuses = ['Recebida', 'Em análise', 'Respondida', 'Resolvida']; // Define a ordem das situações.
 const demoEmails = {aluno:'aluno.exemplo@camporeal.edu.br',supervisor:'supervisor.exemplo@camporeal.edu.br',diretor:'diretor.exemplo@camporeal.edu.br'}; // Contas fictícias, sem validade no servidor.
-let user = null, tickets = [], activeId = null, codeSent = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
+let user = null, tickets = [], activeId = null, registerMode = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); // Impede que relatos sejam interpretados como HTML.
 const date = value => new Date(value * 1000).toLocaleString('pt-BR', {timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}); // Mostra datas no horário de Brasília.
 const badge = status => `<span class="badge ${['','analysis','answered','solved'][statuses.indexOf(status)] || ''}">${escapeHTML(status)}</span>`; // Gera o marcador de situação.
@@ -104,7 +93,7 @@ async function api(path, data) { // Centraliza a comunicação com o servidor re
   return result; // Entrega os dados autorizados.
 }
 function loggedOut() { // Restaura a apresentação pública.
-  user = null; tickets = []; activeId = null; // Descarta dados privados da memória da tela.
+  user = null; tickets = []; activeId = null; resetLogin(); // Descarta dados privados da memória da tela.
   $('workspace').hidden = true; $('welcome').hidden = false; $('how').hidden = false; // Mostra a entrada.
   $('account').replaceChildren(); $('ticketList').replaceChildren(); $('detailContent').replaceChildren(); // Limpa os dados exibidos.
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); // Fecha janelas privadas.
@@ -159,25 +148,29 @@ function action(label, handler) { // Cria um botão de ação sem eventos HTML e
 async function updateStatus(status) { // Solicita a alteração autorizada de situação.
   await api('/api/status', {id:activeId,status}); await refresh(); showDetail(activeId); notify('Situação atualizada.'); // Recarrega o estado confirmado pelo servidor.
 }
-$('loginForm').onsubmit = event => { // Trata envio do e-mail ou do código.
+function setRegisterMode(enabled) { // Alterna entre entrar e criar conta, sem segunda etapa por e-mail.
+  registerMode = enabled; $('confirmField').hidden = !enabled; $('confirmPassword').required = enabled; // Solicita confirmação somente no cadastro.
+  $('password').autocomplete = enabled ? 'new-password' : 'current-password'; // Ajuda o gerenciador de senhas do navegador.
+  $('loginButton').textContent = enabled ? 'Criar minha conta →' : 'Entrar →'; // Explica exatamente o que o botão fará.
+  $('toggleRegister').textContent = enabled ? 'Já tenho conta. Entrar' : 'Primeiro acesso? Criar conta de aluno'; // Oferece retorno à tela de entrada.
+  $('forgotPassword').hidden = enabled; $('password').value = ''; $('confirmPassword').value = ''; // Limpa senhas ao trocar a operação.
+}
+$('loginForm').onsubmit = event => { // Faz cadastro ou acesso com e-mail e senha.
   event.preventDefault(); // Evita recarregar a página.
-  busy($('loginButton'), async () => { // Mostra o estado de espera.
-    const email = $('email').value.trim().toLowerCase(); // Normaliza o endereço.
-    if (!/^[^\s@]+@camporeal\.edu\.br$/.test(email)) throw new Error('Use seu e-mail @camporeal.edu.br.'); // Ajuda o usuário antes da validação definitiva no servidor.
-    if (DEMO) { user = {email,role:'aluno'}; await loggedIn(); return; } // No arquivo local, todo e-mail digitado é apenas um aluno fictício.
-    if (!codeSent) { // Solicita o código na primeira etapa.
-      await api('/api/login', {email}); codeSent = true; $('codeField').hidden = false; $('code').required = true; $('email').readOnly = true; $('loginButton').textContent = 'Entrar na ouvidoria →'; $('changeEmail').hidden = false; $('code').focus(); // Prepara a confirmação do e-mail.
-      notify('Código enviado ao e-mail institucional. Ele vale por 10 minutos.'); // Informa o próximo passo.
-    } else { // Confirma o código recebido.
-      await api('/api/verify', {email,code:$('code').value.trim()}); user = await api('/api/me'); await loggedIn(); // Inicia a sessão real somente após validação.
-      resetLogin(); // Limpa os campos usados no acesso.
-    }
+  busy($('loginButton'), async () => { // Impede cliques repetidos durante a autenticação.
+    const email = $('email').value.trim().toLowerCase(); const password = $('password').value; // Preserva os caracteres da senha, inclusive espaços.
+    if (!/^[^\s@]+@camporeal\.edu\.br$/.test(email)) throw new Error('Use seu e-mail @camporeal.edu.br.'); // Oferece validação imediata do domínio.
+    if (registerMode && password !== $('confirmPassword').value) throw new Error('As senhas precisam ser iguais.'); // Evita cadastrar uma senha digitada incorretamente.
+    if (DEMO) { user = {email,role:'aluno'}; await loggedIn(); resetLogin(); return; } // No demonstrador, toda conta digitada continua fictícia.
+    await api(registerMode ? '/api/register' : '/api/login', {email,password}); // O servidor define o perfil e verifica a senha.
+    user = await api('/api/me'); await loggedIn(); resetLogin(); // Entra direto após o cadastro ou a senha correta.
   });
 };
-function resetLogin() { // Restaura a primeira etapa da autenticação.
-  codeSent = false; $('codeField').hidden = true; $('code').required = false; $('email').readOnly = false; $('changeEmail').hidden = true; $('loginButton').textContent = 'Receber código de acesso →'; $('loginForm').reset(); // Descarta código e e-mail da tela.
+function resetLogin() { // Remove as credenciais da tela depois do acesso.
+  $('loginForm').reset(); setRegisterMode(false); // Volta ao modo padrão de entrada.
 }
-$('changeEmail').onclick = resetLogin; // Permite voltar à etapa inicial e reenviar após o intervalo.
+$('toggleRegister').onclick = () => setRegisterMode(!registerMode); // Permite criar somente contas de aluno pelo site.
+$('forgotPassword').onclick = () => notify('Peça ao responsável pela instalação para redefinir sua senha pelo menu python ouvidoria.py --contas.'); // Não usa links ou códigos de recuperação por e-mail.
 $('newTicket').onclick = () => { $('ticketForm').reset(); $('composeDialog').showModal(); }; // Abre um formulário limpo.
 $('ticketForm').onsubmit = event => { // Envia uma manifestação.
   event.preventDefault(); // Preserva a navegação atual.
@@ -195,13 +188,13 @@ $('search').oninput = renderList; $('statusFilter').onchange = renderList; // Re
 $('allTab').onclick = () => { $('search').value = ''; $('statusFilter').value = ''; renderList(); }; // Restaura todos os protocolos.
 document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => $(button.dataset.close).close()); // Liga os botões de fechar às janelas.
 if (DEMO) { // Configura somente o arquivo de demonstração.
-  $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; // Identifica claramente a simulação.
+  $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; $('password').required = false; // Identifica claramente a simulação.
   document.querySelectorAll('[data-demo]').forEach(button => button.onclick = () => busy(button, async () => {user = {email:demoEmails[button.dataset.demo],role:button.dataset.demo}; await loggedIn();})); // Permite explorar os três perfis fictícios.
 } else { // Ao abrir pelo servidor, tenta recuperar uma sessão já validada.
   api('/api/me').then(async result => {user = result; await loggedIn();}).catch(error => { if (error.message && !error.message.includes('Entre com') && !error.message.includes('expirou')) notify(error.message, true); }); // Mostra a entrada se não houver sessão.
 }
 ''',
-    # Conteúdo de assets/logo-azul.svg; mantém os comentários para facilitar o estudo.
+    # Conteúdo comentado de assets/logo-azul.svg.
     'assets/logo-azul.svg': r'''<!-- Reprodução vetorial de referência baseada na marca anexada; substituir pelo arquivo oficial para publicação. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 335" role="img" aria-label="Centro Universitário Campo Real, excelência no ensino superior">
 <!-- Estrela amarela da identidade visual. -->
@@ -214,7 +207,7 @@ if (DEMO) { // Configura somente o arquivo de demonstração.
 <text x="340" y="330" font-size="37" textLength="675" lengthAdjust="spacingAndGlyphs">EXCELÊNCIA NO ENSINO SUPERIOR</text>
 </g>
 </svg>''',
-    # Conteúdo de assets/logo-branca.svg; mantém os comentários para facilitar o estudo.
+    # Conteúdo comentado de assets/logo-branca.svg.
     'assets/logo-branca.svg': r'''<!-- Reprodução vetorial de referência baseada na marca anexada; substituir pelo arquivo oficial para publicação. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 335" role="img" aria-label="Centro Universitário Campo Real, excelência no ensino superior">
 <!-- Estrela amarela da identidade visual. -->
@@ -227,7 +220,7 @@ if (DEMO) { // Configura somente o arquivo de demonstração.
 <text x="340" y="330" font-size="37" textLength="675" lengthAdjust="spacingAndGlyphs">EXCELÊNCIA NO ENSINO SUPERIOR</text>
 </g>
 </svg>''',
-    # Conteúdo de index.html; mantém os comentários para facilitar o estudo.
+    # Conteúdo comentado de index.html.
     'index.html': r'''<!doctype html> <!-- Usa o padrão HTML atual. -->
 <html lang="pt-BR"> <!-- Informa o idioma para leitores de tela. -->
 <head> <!-- Reúne as configurações da página. -->
@@ -248,12 +241,15 @@ if (DEMO) { // Configura somente o arquivo de demonstração.
 <main id="inicio"> <!-- Agrupa o conteúdo principal. -->
 <section id="welcome" class="welcome"> <!-- Apresenta o canal de escuta. -->
 <div class="intro"><span class="eyebrow light">OUVIDORIA CAMPO REAL</span><h1>Sua voz faz<br>parte da mudança<span>.</span></h1><p>Um espaço para ouvir você, acolher suas ideias e construir uma faculdade cada vez melhor.</p><div class="intro-points"><span>✓ Escuta com respeito</span><span>✓ Acompanhamento por protocolo</span></div><div class="intro-bottom"><span class="small-star" aria-hidden="true">✦</span><p>Reclamações, críticas, sugestões e elogios.<br><strong>Toda manifestação importa.</strong></p></div></div> <!-- Explica a proposta do atendimento. -->
-<div class="login-card"><span class="step-label">SEU ESPAÇO DE ESCUTA</span><h2>Vamos conversar?</h2><p>Entre com seu e-mail institucional para enviar ou acompanhar uma manifestação.</p>
-<form id="loginForm"> <!-- Solicita e confirma a identidade institucional. -->
-<label for="email">E-mail institucional</label><input id="email" type="email" required maxlength="254" autocomplete="email"> <!-- Recebe o endereço do aluno ou da equipe. -->
-<div id="codeField" hidden><label for="code">Código recebido por e-mail</label><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6 dígitos"></div> <!-- Exibe a verificação após o envio. -->
-<button id="loginButton" class="button primary" type="submit">Receber código de acesso <span aria-hidden="true">→</span></button> <!-- Inicia a autenticação. -->
-<button id="changeEmail" type="button" class="text-button" hidden>Trocar e-mail / solicitar novo código</button> <!-- Permite corrigir o endereço. -->
+<div class="login-card"><span class="step-label">SEU ESPAÇO DE ESCUTA</span><h2>Vamos conversar?</h2><p>Entre com seu e-mail institucional e senha. No primeiro acesso, crie sua conta de aluno.</p>
+<form id="loginForm"> <!-- Acesso direto com e-mail e senha, sem serviço de envio. -->
+<label for="email">E-mail institucional</label><input id="email" type="email" required maxlength="254" autocomplete="username"> <!-- Mantém o campo vazio e exige endereço institucional. -->
+<label for="password">Senha</label><input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"> <!-- Não exibe a senha digitada. -->
+<div id="confirmField" hidden><label for="confirmPassword">Confirmar senha</label><input id="confirmPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password"></div> <!-- Confere a senha antes de cadastrar. -->
+<button id="loginButton" class="button primary" type="submit">Entrar →</button> <!-- Envia o acesso ao servidor Python. -->
+<button id="toggleRegister" type="button" class="text-button">Primeiro acesso? Criar conta de aluno</button> <!-- Permite cadastro sem escolher permissões administrativas. -->
+<button id="forgotPassword" type="button" class="text-button">Esqueci minha senha</button> <!-- Orienta recuperação pelo responsável, sem SMTP. -->
+<p id="authHint" class="form-note">Use seu e-mail @camporeal.edu.br. O cadastro verifica o domínio, mas não comprova a titularidade do e-mail.</p> <!-- Explica o limite do modelo escolhido. -->
 </form>
 <div id="demoAccounts" class="demo-accounts" hidden><p>Explore os perfis fictícios:</p><button type="button" data-demo="aluno">Aluno</button><button type="button" data-demo="supervisor">Supervisor</button><button type="button" data-demo="diretor">Diretor</button></div> <!-- Oferece perfis apenas no arquivo de demonstração. -->
 <div class="privacy-note"><span aria-hidden="true">◈</span><p><strong>Você escolhe como se identificar.</strong><br>Na opção anônima, sua identidade fica oculta para a equipe de atendimento e pode ser consultada somente pelo diretor. O login continua obrigatório.</p></div> <!-- Explica o limite do anonimato antes do acesso. -->
@@ -286,7 +282,7 @@ if (DEMO) { // Configura somente o arquivo de demonstração.
 </body>
 </html>
 ''',
-    # Conteúdo de style.css; mantém os comentários para facilitar o estudo.
+    # Conteúdo comentado de style.css.
     'style.css': r'''/* Define a identidade visual: azul principal, branco e amarelo nos detalhes. */
 :root { --blue:#004c70; --navy:#06344d; --yellow:#ffdd00; --ink:#17394b; --muted:#637683; --line:#dce5ea; --paper:#f5f8fa; --radius:14px; font-family:Arial,Helvetica,sans-serif; color:var(--ink); background:var(--paper); }
 /* Inclui bordas no cálculo de tamanho para evitar transbordamento. */
@@ -486,8 +482,11 @@ dialog::backdrop { background:#052c46a6; }
 .footer-brand { display:flex; align-items:center; gap:22px; }
 /* Mantém a proporção da segunda versão da marca. */
 .footer-brand img { object-fit:contain; }
+
+/* Facilita encontrar os atalhos da conta abaixo do botão principal. */
+#toggleRegister,#forgotPassword { display:block; text-align:left; margin-top:8px; }
 ''',
-    # Conteúdo de DEMONSTRACAO.html; mantém os comentários para facilitar o estudo.
+    # Conteúdo comentado de DEMONSTRACAO.html.
     'DEMONSTRACAO.html': r'''<!doctype html> <!-- Usa o padrão HTML atual. -->
 <html lang="pt-BR"> <!-- Informa o idioma para leitores de tela. -->
 <head> <!-- Reúne as configurações da página. -->
@@ -696,6 +695,9 @@ dialog::backdrop { background:#052c46a6; }
 /* Mantém a proporção da segunda versão da marca. */
 .footer-brand img { object-fit:contain; }
 
+/* Facilita encontrar os atalhos da conta abaixo do botão principal. */
+#toggleRegister,#forgotPassword { display:block; text-align:left; margin-top:8px; }
+
 </style> <!-- Carrega as cores e o layout. -->
  <!-- Executa as interações depois de carregar o HTML. -->
 </head>
@@ -709,12 +711,15 @@ dialog::backdrop { background:#052c46a6; }
 <main id="inicio"> <!-- Agrupa o conteúdo principal. -->
 <section id="welcome" class="welcome"> <!-- Apresenta o canal de escuta. -->
 <div class="intro"><span class="eyebrow light">OUVIDORIA CAMPO REAL</span><h1>Sua voz faz<br>parte da mudança<span>.</span></h1><p>Um espaço para ouvir você, acolher suas ideias e construir uma faculdade cada vez melhor.</p><div class="intro-points"><span>✓ Escuta com respeito</span><span>✓ Acompanhamento por protocolo</span></div><div class="intro-bottom"><span class="small-star" aria-hidden="true">✦</span><p>Reclamações, críticas, sugestões e elogios.<br><strong>Toda manifestação importa.</strong></p></div></div> <!-- Explica a proposta do atendimento. -->
-<div class="login-card"><span class="step-label">SEU ESPAÇO DE ESCUTA</span><h2>Vamos conversar?</h2><p>Entre com seu e-mail institucional para enviar ou acompanhar uma manifestação.</p>
-<form id="loginForm"> <!-- Solicita e confirma a identidade institucional. -->
-<label for="email">E-mail institucional</label><input id="email" type="email" required maxlength="254" autocomplete="email"> <!-- Recebe o endereço do aluno ou da equipe. -->
-<div id="codeField" hidden><label for="code">Código recebido por e-mail</label><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6 dígitos"></div> <!-- Exibe a verificação após o envio. -->
-<button id="loginButton" class="button primary" type="submit">Receber código de acesso <span aria-hidden="true">→</span></button> <!-- Inicia a autenticação. -->
-<button id="changeEmail" type="button" class="text-button" hidden>Trocar e-mail / solicitar novo código</button> <!-- Permite corrigir o endereço. -->
+<div class="login-card"><span class="step-label">SEU ESPAÇO DE ESCUTA</span><h2>Vamos conversar?</h2><p>Entre com seu e-mail institucional e senha. No primeiro acesso, crie sua conta de aluno.</p>
+<form id="loginForm"> <!-- Acesso direto com e-mail e senha, sem serviço de envio. -->
+<label for="email">E-mail institucional</label><input id="email" type="email" required maxlength="254" autocomplete="username"> <!-- Mantém o campo vazio e exige endereço institucional. -->
+<label for="password">Senha</label><input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"> <!-- Não exibe a senha digitada. -->
+<div id="confirmField" hidden><label for="confirmPassword">Confirmar senha</label><input id="confirmPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password"></div> <!-- Confere a senha antes de cadastrar. -->
+<button id="loginButton" class="button primary" type="submit">Entrar →</button> <!-- Envia o acesso ao servidor Python. -->
+<button id="toggleRegister" type="button" class="text-button">Primeiro acesso? Criar conta de aluno</button> <!-- Permite cadastro sem escolher permissões administrativas. -->
+<button id="forgotPassword" type="button" class="text-button">Esqueci minha senha</button> <!-- Orienta recuperação pelo responsável, sem SMTP. -->
+<p id="authHint" class="form-note">Use seu e-mail @camporeal.edu.br. O cadastro verifica o domínio, mas não comprova a titularidade do e-mail.</p> <!-- Explica o limite do modelo escolhido. -->
 </form>
 <div id="demoAccounts" class="demo-accounts" hidden><p>Explore os perfis fictícios:</p><button type="button" data-demo="aluno">Aluno</button><button type="button" data-demo="supervisor">Supervisor</button><button type="button" data-demo="diretor">Diretor</button></div> <!-- Oferece perfis apenas no arquivo de demonstração. -->
 <div class="privacy-note"><span aria-hidden="true">◈</span><p><strong>Você escolhe como se identificar.</strong><br>Na opção anônima, sua identidade fica oculta para a equipe de atendimento e pode ser consultada somente pelo diretor. O login continua obrigatório.</p></div> <!-- Explica o limite do anonimato antes do acesso. -->
@@ -750,7 +755,7 @@ const $ = id => document.getElementById(id); // Facilita localizar elementos pel
 const DEMO = location.protocol === 'file:'; // Ativa o demonstrador somente quando o arquivo é aberto diretamente.
 const statuses = ['Recebida', 'Em análise', 'Respondida', 'Resolvida']; // Define a ordem das situações.
 const demoEmails = {aluno:'aluno.exemplo@camporeal.edu.br',supervisor:'supervisor.exemplo@camporeal.edu.br',diretor:'diretor.exemplo@camporeal.edu.br'}; // Contas fictícias, sem validade no servidor.
-let user = null, tickets = [], activeId = null, codeSent = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
+let user = null, tickets = [], activeId = null, registerMode = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); // Impede que relatos sejam interpretados como HTML.
 const date = value => new Date(value * 1000).toLocaleString('pt-BR', {timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}); // Mostra datas no horário de Brasília.
 const badge = status => `<span class="badge ${['','analysis','answered','solved'][statuses.indexOf(status)] || ''}">${escapeHTML(status)}</span>`; // Gera o marcador de situação.
@@ -809,7 +814,7 @@ async function api(path, data) { // Centraliza a comunicação com o servidor re
   return result; // Entrega os dados autorizados.
 }
 function loggedOut() { // Restaura a apresentação pública.
-  user = null; tickets = []; activeId = null; // Descarta dados privados da memória da tela.
+  user = null; tickets = []; activeId = null; resetLogin(); // Descarta dados privados da memória da tela.
   $('workspace').hidden = true; $('welcome').hidden = false; $('how').hidden = false; // Mostra a entrada.
   $('account').replaceChildren(); $('ticketList').replaceChildren(); $('detailContent').replaceChildren(); // Limpa os dados exibidos.
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); // Fecha janelas privadas.
@@ -864,25 +869,29 @@ function action(label, handler) { // Cria um botão de ação sem eventos HTML e
 async function updateStatus(status) { // Solicita a alteração autorizada de situação.
   await api('/api/status', {id:activeId,status}); await refresh(); showDetail(activeId); notify('Situação atualizada.'); // Recarrega o estado confirmado pelo servidor.
 }
-$('loginForm').onsubmit = event => { // Trata envio do e-mail ou do código.
+function setRegisterMode(enabled) { // Alterna entre entrar e criar conta, sem segunda etapa por e-mail.
+  registerMode = enabled; $('confirmField').hidden = !enabled; $('confirmPassword').required = enabled; // Solicita confirmação somente no cadastro.
+  $('password').autocomplete = enabled ? 'new-password' : 'current-password'; // Ajuda o gerenciador de senhas do navegador.
+  $('loginButton').textContent = enabled ? 'Criar minha conta →' : 'Entrar →'; // Explica exatamente o que o botão fará.
+  $('toggleRegister').textContent = enabled ? 'Já tenho conta. Entrar' : 'Primeiro acesso? Criar conta de aluno'; // Oferece retorno à tela de entrada.
+  $('forgotPassword').hidden = enabled; $('password').value = ''; $('confirmPassword').value = ''; // Limpa senhas ao trocar a operação.
+}
+$('loginForm').onsubmit = event => { // Faz cadastro ou acesso com e-mail e senha.
   event.preventDefault(); // Evita recarregar a página.
-  busy($('loginButton'), async () => { // Mostra o estado de espera.
-    const email = $('email').value.trim().toLowerCase(); // Normaliza o endereço.
-    if (!/^[^\s@]+@camporeal\.edu\.br$/.test(email)) throw new Error('Use seu e-mail @camporeal.edu.br.'); // Ajuda o usuário antes da validação definitiva no servidor.
-    if (DEMO) { user = {email,role:'aluno'}; await loggedIn(); return; } // No arquivo local, todo e-mail digitado é apenas um aluno fictício.
-    if (!codeSent) { // Solicita o código na primeira etapa.
-      await api('/api/login', {email}); codeSent = true; $('codeField').hidden = false; $('code').required = true; $('email').readOnly = true; $('loginButton').textContent = 'Entrar na ouvidoria →'; $('changeEmail').hidden = false; $('code').focus(); // Prepara a confirmação do e-mail.
-      notify('Código enviado ao e-mail institucional. Ele vale por 10 minutos.'); // Informa o próximo passo.
-    } else { // Confirma o código recebido.
-      await api('/api/verify', {email,code:$('code').value.trim()}); user = await api('/api/me'); await loggedIn(); // Inicia a sessão real somente após validação.
-      resetLogin(); // Limpa os campos usados no acesso.
-    }
+  busy($('loginButton'), async () => { // Impede cliques repetidos durante a autenticação.
+    const email = $('email').value.trim().toLowerCase(); const password = $('password').value; // Preserva os caracteres da senha, inclusive espaços.
+    if (!/^[^\s@]+@camporeal\.edu\.br$/.test(email)) throw new Error('Use seu e-mail @camporeal.edu.br.'); // Oferece validação imediata do domínio.
+    if (registerMode && password !== $('confirmPassword').value) throw new Error('As senhas precisam ser iguais.'); // Evita cadastrar uma senha digitada incorretamente.
+    if (DEMO) { user = {email,role:'aluno'}; await loggedIn(); resetLogin(); return; } // No demonstrador, toda conta digitada continua fictícia.
+    await api(registerMode ? '/api/register' : '/api/login', {email,password}); // O servidor define o perfil e verifica a senha.
+    user = await api('/api/me'); await loggedIn(); resetLogin(); // Entra direto após o cadastro ou a senha correta.
   });
 };
-function resetLogin() { // Restaura a primeira etapa da autenticação.
-  codeSent = false; $('codeField').hidden = true; $('code').required = false; $('email').readOnly = false; $('changeEmail').hidden = true; $('loginButton').textContent = 'Receber código de acesso →'; $('loginForm').reset(); // Descarta código e e-mail da tela.
+function resetLogin() { // Remove as credenciais da tela depois do acesso.
+  $('loginForm').reset(); setRegisterMode(false); // Volta ao modo padrão de entrada.
 }
-$('changeEmail').onclick = resetLogin; // Permite voltar à etapa inicial e reenviar após o intervalo.
+$('toggleRegister').onclick = () => setRegisterMode(!registerMode); // Permite criar somente contas de aluno pelo site.
+$('forgotPassword').onclick = () => notify('Peça ao responsável pela instalação para redefinir sua senha pelo menu python ouvidoria.py --contas.'); // Não usa links ou códigos de recuperação por e-mail.
 $('newTicket').onclick = () => { $('ticketForm').reset(); $('composeDialog').showModal(); }; // Abre um formulário limpo.
 $('ticketForm').onsubmit = event => { // Envia uma manifestação.
   event.preventDefault(); // Preserva a navegação atual.
@@ -900,7 +909,7 @@ $('search').oninput = renderList; $('statusFilter').onchange = renderList; // Re
 $('allTab').onclick = () => { $('search').value = ''; $('statusFilter').value = ''; renderList(); }; // Restaura todos os protocolos.
 document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => $(button.dataset.close).close()); // Liga os botões de fechar às janelas.
 if (DEMO) { // Configura somente o arquivo de demonstração.
-  $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; // Identifica claramente a simulação.
+  $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; $('password').required = false; // Identifica claramente a simulação.
   document.querySelectorAll('[data-demo]').forEach(button => button.onclick = () => busy(button, async () => {user = {email:demoEmails[button.dataset.demo],role:button.dataset.demo}; await loggedIn();})); // Permite explorar os três perfis fictícios.
 } else { // Ao abrir pelo servidor, tenta recuperar uma sessão já validada.
   api('/api/me').then(async result => {user = result; await loggedIn();}).catch(error => { if (error.message && !error.message.includes('Entre com') && !error.message.includes('expirou')) notify(error.message, true); }); // Mostra a entrada se não houver sessão.
@@ -910,145 +919,124 @@ if (DEMO) { // Configura somente o arquivo de demonstração.
 </body>
 </html>
 ''',
-    # Conteúdo de configuracao.env.example; mantém os comentários para facilitar o estudo.
-    'configuracao.env.example': r'''# Copie este arquivo para .env. Não compartilhe o arquivo preenchido.
-# Endereço exato usado no navegador (sem barra no final).
+    # Conteúdo comentado de configuracao.env.example.
+    'configuracao.env.example': r'''# Configuração opcional: o site funciona sem SMTP e sem arquivo .env.
+# Para testes locais, basta executar python ouvidoria.py.
 APP_URL=http://localhost:8000
-# Mantém o acesso restrito ao computador local durante a instalação.
 HOST=127.0.0.1
-# Porta em que o servidor atende.
 PORT=8000
-# Única conta que pode consultar a autoria das manifestações anônimas.
-DIRECTOR_EMAIL=
-# Contas da equipe que responde, separadas por vírgula.
-SUPERVISOR_EMAILS=
-# Servidor SMTP da faculdade, com STARTTLS obrigatório.
-SMTP_HOST=
-# Porta padrão de SMTP com STARTTLS; use o valor fornecido pela TI.
-SMTP_PORT=587
-# Endereço de remetente autorizado pelo servidor SMTP.
-SMTP_FROM=
-# Usuário de envio; deixe vazio se o servidor não exigir autenticação.
-SMTP_USER=
-# Senha de aplicativo ou credencial SMTP, obtida com a TI.
-SMTP_PASSWORD=
+# As contas de aluno, supervisor e diretor ficam no banco SQLite.
+# Crie ou redefina contas pelo comando: python ouvidoria.py --contas
 ''',
-    # Conteúdo de LEIA-ME.md; mantém os comentários para facilitar o estudo.
-    'LEIA-ME.md': r'''# Ouvidoria Campo Real
+    # Conteúdo comentado de LEIA-ME.md.
+    'LEIA-ME.md': r'''# Ouvidoria Campo Real — login simples
 
-Site em português, com azul e branco como cores principais e amarelo nos detalhes. Código comentado em HTML, CSS, JavaScript e Python, sem dependências externas. Requer Python 3.10 ou superior para o sistema real.
+Projeto em **Python 3.10 ou superior**, com código comentado e banco SQLite. Não precisa instalar bibliotecas, configurar Gmail, SMTP ou receber códigos por e-mail.
 
-## 1. Veja primeiro a demonstração
+## Baixar e abrir
 
-Abra `DEMONSTRACAO.html` com dois cliques no navegador. Esse arquivo é independente, funciona sem internet e já contém estilos, scripts e as duas versões da marca. Os botões **Aluno**, **Supervisor** e **Diretor** permitem explorar os perfis com dados fictícios.
+No GitHub, clique em **Code → Download ZIP** e extraia a pasta. Abra o terminal nessa pasta e execute:
 
-A demonstração NÃO autentica pessoas e NÃO protege dados: tudo fica no navegador. Não coloque relatos nem e-mails reais nela. A auditoria mostrada na demonstração é ilustrativa. Ela serve para apresentação e avaliação das telas.
+```sh
+python ouvidoria.py
+```
 
-Para restaurar os exemplos, exclua a chave `camporeal-demo-v1` no armazenamento local do navegador. Os três protocolos iniciais são fictícios.
+No Windows, se necessário, use `py -3 ouvidoria.py`. Depois, abra **http://localhost:8000** no navegador. Para parar o programa, use **Ctrl+C**.
 
-## 2. Inicie o sistema com servidor e banco de dados
+O arquivo `ouvidoria.py` já contém o servidor e os conteúdos das telas. A cópia `ouvidoria-python.txt` tem o mesmo conteúdo; pode ser renomeada para `.py` caso o download dessa extensão seja bloqueado.
 
-1. Extraia o ZIP para uma pasta no seu computador.
-2. Instale Python 3.10 ou superior, caso ainda não esteja instalado.
-3. Copie `.env.example` para um arquivo chamado `.env`, na mesma pasta de `start.py`.
-4. Preencha os parâmetros de envio de e-mail fornecidos pela TI da faculdade.
-5. Preencha `DIRECTOR_EMAIL` com UMA conta institucional do diretor. Não coloque vírgulas nesse campo.
-6. Preencha `SUPERVISOR_EMAILS` com as contas dos supervisores/administradores autorizados, separadas por vírgula.
-7. No terminal, entre na pasta do projeto e execute `python start.py` (no Windows, também pode usar `py -3 start.py` ou abrir `INICIAR.bat`).
-8. Abra **http://localhost:8000**. Use exatamente esse endereço, porque `APP_URL` controla a origem permitida.
+## Alunos: criar conta e entrar
 
-O banco é criado automaticamente em `data/ouvidoria.sqlite3`, fora da pasta pública. Não é necessário instalar bibliotecas nem executar migrações manualmente. O servidor permanece ativo enquanto a janela do terminal estiver aberta.
+1. Na tela de acesso, clique em **Primeiro acesso? Criar conta de aluno**.
+2. Digite um e-mail `@camporeal.edu.br`.
+3. Escolha uma senha de **8 a 128 caracteres** e repita para confirmar.
+4. Clique em **Criar minha conta**. O acesso acontece imediatamente.
+5. Nas próximas visitas, use apenas e-mail e senha e clique em **Entrar**.
 
-O arquivo `.env` é lido pelo `start.py`. Se preferir iniciar `server.py` diretamente, configure as variáveis no ambiente do sistema operacional.
+O campo de e-mail começa vazio, sem texto de exemplo. O cadastro público é sempre de **aluno**; não existe escolha de perfil administrativo no site.
 
-### Configuração de e-mail
+**O domínio institucional é conferido, mas o sistema não comprova que a pessoa é dona do e-mail.** Esse é o limite da opção sem verificação por mensagem. Não use a informação como identidade institucional verificada.
 
-O acesso real exige um código de seis dígitos enviado ao e-mail `@camporeal.edu.br`. O código dura dez minutos e admite cinco tentativas incorretas. Cada reenvio exige intervalo mínimo de 60 segundos. A sessão dura oito horas.
+## Criar supervisor e diretor
 
-- `SMTP_HOST`: servidor SMTP autorizado pela faculdade.
-- `SMTP_PORT`: normalmente 587, com STARTTLS obrigatório.
-- `SMTP_FROM`: remetente permitido pelo servidor.
-- `SMTP_USER` e `SMTP_PASSWORD`: credenciais de SMTP. Se o servidor não exigir autenticação, deixe o usuário vazio.
+No computador em que o programa está instalado, pare o servidor com **Ctrl+C** e execute:
 
-Não envie senhas pelo chat e não coloque credenciais no código. O `.env` é privado e deve ficar apenas no servidor. Provedores que exigem OAuth para envio SMTP precisam de uma integração própria de envio ou de um relay autorizado pela TI; este projeto usa SMTP com STARTTLS e autenticação por usuário/senha quando configurada.
+```sh
+python ouvidoria.py --contas
+```
 
-**Google:** não foi incluído um botão de login do Google sem integração. A alternativa solicitada foi implementada com verificação real do e-mail institucional por código, em vez de apenas validar o texto do domínio.
+O menu oferece:
 
-Sem SMTP configurado, a aplicação real informa que o envio está indisponível. Não existe código mestre, senha padrão ou desvio de login para a produção.
+- **1 — Criar conta:** informe e-mail institucional, escolha aluno, supervisor ou diretor e defina a senha duas vezes. A senha não aparece enquanto é digitada; isso é normal.
+- **2 — Redefinir senha:** informe uma conta existente e uma nova senha. As sessões anteriores dessa conta serão encerradas.
+- **3 — Listar contas:** mostra apenas os e-mails e os perfis, nunca senhas.
+- **0 — Sair:** fecha o menu.
 
-## 3. Perfis e privacidade
+Depois, inicie novamente com `python ouvidoria.py`.
 
-| Perfil | Permissões |
-| --- | --- |
-| Aluno | Criar reclamação, crítica, sugestão, elogio ou solicitação; escolher identificação; consultar somente os próprios protocolos; ler respostas; complementar o relato; confirmar solução; pedir nova análise. |
-| Supervisor / administrador de atendimento | Consultar a fila; responder manifestações; marcar em análise; ver e-mail somente em manifestações identificadas. Não pode consultar autoria de manifestações anônimas. |
-| Diretor | Atender como a equipe e, adicionalmente, consultar a autoria de manifestações anônimas. Cada consulta exige ação explícita e fica na auditoria do servidor. |
+Crie as contas de equipe por esse menu, antes de tentar cadastrá-las no site. Existe somente **um diretor** no banco. O perfil é atribuído localmente; conhecer o e-mail da direção não permite receber privilégios por cadastro público. Não há senha padrão ou código mestre.
 
-Os perfis são definidos no servidor, a partir das contas verificadas. O aluno não escolhe virar supervisor ou diretor. Se uma conta estiver nas duas configurações, o perfil diretor prevalece.
+## Esqueci a senha
 
-**“Anônima” significa identidade oculta para a equipe de atendimento, com acesso restrito ao diretor. Não significa anonimato absoluto.** O site explica isso antes do login e antes do envio. A autenticação é obrigatória em ambos os modos. Um nome ou e-mail escrito pelo próprio aluno no relato continuará visível; o formulário orienta a não se identificar no texto.
+O aluno deve pedir ao responsável pela instalação para usar a opção **Redefinir senha** no menu `--contas`. Não há recuperação automática por e-mail e não é possível consultar a senha antiga, pois ela não é armazenada em texto simples.
 
-O diretor também recebe a fila sem a autoria anônima; para vê-la, precisa clicar em **Consultar autoria restrita**. O acesso cria um registro em `audit`, com conta do diretor, protocolo, ação e data. Não há tela pública de auditoria; a TI pode consultar essa tabela no banco com ferramentas administrativas.
+## Atualizar uma instalação anterior
 
-O controle exclusivo do diretor é aplicado pela API. Pessoas com acesso administrativo ao servidor ou ao arquivo de banco podem acessar os dados armazenados; restrinja essas permissões na infraestrutura da faculdade.
+1. Pare o programa.
+2. Faça uma cópia privada da pasta `data` com o serviço parado.
+3. Substitua `ouvidoria.py` pela versão nova, **na mesma pasta**, mantendo `data`.
+4. Execute `python ouvidoria.py --contas` e crie as contas necessárias, com os mesmos e-mails de quem já tem relatos.
+5. Inicie o servidor novamente.
 
-## 4. Como funciona o atendimento
+A primeira execução cria as tabelas de contas e encerra sessões/códigos antigos. **Os relatos, as respostas e a auditoria são preservados.** E-mails que já têm histórico da versão antiga não podem ser tomados pelo cadastro público: o responsável precisa criar a conta no menu local. A migração não repete o encerramento de sessões a cada reinício.
 
-1. O aluno recebe um protocolo ao enviar o relato.
-2. A manifestação começa como **Recebida**.
-3. A equipe pode marcar **Em análise**.
-4. Quando a equipe responde, a situação passa para **Respondida**.
-5. O aluno consulta a resposta na própria área e pode marcar **Foi resolvido**, mudando para **Resolvida**.
-6. Se ainda houver problema, o aluno pede nova análise ou escreve outra mensagem. O protocolo volta a **Em análise**.
+O `.env` antigo pode continuar na pasta, mas as opções SMTP não são usadas. `DIRECTOR_EMAIL` e `SUPERVISOR_EMAILS`, quando existentes, apenas reservam os antigos endereços contra cadastro público; não concedem perfis automaticamente. Crie as contas no menu local.
 
-A equipe não marca uma manifestação como resolvida em nome do aluno. As mensagens e mudanças de situação permanecem no histórico. A aplicação não envia avisos automáticos de novas respostas: o aluno acompanha pelo painel.
+## Permissões e atendimento
 
-## 5. Marca e arquivos
+- **Aluno:** cria reclamação, crítica, sugestão, elogio ou solicitação; consulta somente os próprios protocolos; lê respostas; envia complementos; confirma solução ou pede nova análise.
+- **Supervisor:** atende e responde à fila, sem receber a autoria dos relatos anônimos.
+- **Diretor:** atende como a equipe e pode consultar explicitamente a autoria anônima. Cada consulta fica registrada na tabela `audit`.
 
-As imagens anexadas ficaram visíveis na conversa, mas não foram disponibilizadas como arquivos binários ao ambiente de execução. Por isso, as duas versões incluídas são **reproduções vetoriais de referência**, baseadas nas imagens recebidas, com estrela amarela e textos azul ou branco. Elas não são os arquivos originais e podem ter diferenças tipográficas.
+As situações são **Recebida**, **Em análise**, **Respondida** e **Resolvida**. O aluno confirma a solução; a equipe não encerra por ele. Respostas e mudanças de situação ficam no histórico. O aluno acompanha pelo painel, sem notificações automáticas por e-mail.
 
-Antes de publicar oficialmente, substitua:
+**Anonimato significa identidade oculta para o atendimento, com consulta pelo diretor na aplicação.** O cadastro e o login continuam obrigatórios. Se a pessoa escrever nome ou e-mail no relato, esse texto ficará visível. Quem administra o computador ou o banco também pode acessar os arquivos; restrinja o acesso à infraestrutura.
 
-- `public/assets/logo-azul.svg`: marca usada no cabeçalho branco.
-- `public/assets/logo-branca.svg`: marca usada no rodapé azul.
+## Demonstração sem contas reais
 
-Você pode manter esses nomes se receber os originais em SVG. Se os originais forem PNG, ajuste também os caminhos em `public/index.html` e a lista de arquivos públicos em `server.py`. O demonstrador independente contém cópias embutidas e precisa ser atualizado separadamente caso queira trocar as marcas nele.
+Abra `DEMONSTRACAO.html` com dois cliques ou execute:
 
-### Organização
+```sh
+python ouvidoria.py --demo
+```
 
-- `public/index.html`: estrutura das páginas, formulários e janelas.
-- `public/style.css`: cores, espaçamentos e adaptação a celulares.
-- `public/app.js`: interação com a API e modo demonstrativo local.
-- `public/assets/`: versões azul e branca da marca.
-- `server.py`: autenticação, autorização, dados, histórico e auditoria.
-- `start.py`: carregamento da configuração e inicialização.
-- `.env.example`: parâmetros que a TI precisa preencher.
-- `tests/test_server.py`: testes de integração e permissões.
-- `DEMONSTRACAO.html`: prévia independente para abrir com dois cliques.
+Os botões de aluno, supervisor e diretor usam dados fictícios armazenados no navegador. Não coloque informações pessoais na demonstração. O demonstrador não representa a segurança da API real.
 
-Os comentários explicam as instruções e os blocos do código; linhas de fechamento de blocos e delimitadores não repetem comentários sem conteúdo útil.
+## Configuração opcional
 
-## 6. Instalação na faculdade
+O programa funciona localmente sem `.env`. Se precisar mudar endereço ou porta, gere o modelo com `python ouvidoria.py --configurar`, copie `.env.example` para `.env` e ajuste os valores. Não é necessário preencher parâmetros de e-mail.
 
-O pacote é uma base funcional, sem hospedagem contratada ou publicação automática. Para disponibilizá-lo aos alunos, a TI precisa configurar um servidor Python persistente, SMTP e um proxy HTTPS, com `APP_URL` igual ao endereço institucional definitivo. O servidor HTTP da biblioteca padrão foi escolhido pela simplicidade e deve ficar atrás de um proxy reverso adequado (por exemplo, Nginx), com limites de conexão e tempo. Não exponha a pasta do projeto inteira por um servidor de arquivos estáticos.
+O banco fica em `data/ouvidoria.sqlite3`. Não publique `.env` nem `data` no GitHub; ambos estão no `.gitignore`. Não mude `DATABASE_PATH` se quiser continuar usando o banco atual.
 
-Mantenha `HOST=127.0.0.1` quando o proxy estiver no mesmo computador. A aplicação não confia em cabeçalhos `X-Forwarded-For`; o limite por IP considera a conexão direta, portanto a TI deve ajustar essa política ao colocar o servidor atrás de proxy ou em uma rede compartilhada. Os limites por e-mail continuam independentes.
+As senhas usam PBKDF2-HMAC-SHA256, com sal aleatório e 600 mil iterações. Os cookies de sessão são HttpOnly, SameSite e Secure quando o endereço usa HTTPS. Alterações exigem token CSRF e origem compatível com `APP_URL`. Há limites de tentativas por conta e IP. O menu de contas é local, não uma rota pública do site.
 
-Mantenha backups privados do banco com o serviço parado, proteja a conta do diretor, defina retenção dos relatos e a política institucional de privacidade antes da coleta real. Mudanças de perfis no `.env` passam a valer após reiniciar o servidor. Não compartilhe `.env` nem a pasta `data` com os alunos.
+Para uso na faculdade, a TI precisa instalar o programa em servidor persistente e colocar um proxy reverso HTTPS à frente dele. O servidor HTTP da biblioteca padrão foi escolhido para simplificar a instalação e deve ficar atrás desse proxy. Ajuste limites por IP para redes compartilhadas e proxy, pois o programa considera a conexão direta e não confia em `X-Forwarded-For`. Defina privacidade, retenção e backups antes de coletar relatos reais.
 
-## 7. Verificação
+## Telas e marcas
 
-Execute na pasta do projeto:
+HTML, CSS e JavaScript são os conteúdos recebidos pelo navegador e estão embutidos no dicionário `ASSETS`, dentro do Python. O servidor, a autenticação, as permissões e o banco são implementados em Python.
+
+As marcas são reproduções vetoriais de referência das imagens fornecidas, não os arquivos originais. Antes da publicação oficial, substitua os SVGs azul e branco em `ASSETS`. O demonstrador contém cópias próprias que também precisam ser atualizadas.
+
+## Testes
 
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-A suíte usa banco temporário e substitui somente o envio de e-mail. As chamadas HTTP passam pelo servidor real. Verifica domínio exato, autenticação obrigatória, tentativas e validade de código, uso único, isolamento entre alunos, ausência de autoria anônima na fila institucional, bloqueio de consulta pelo supervisor, acesso e auditoria do diretor, respostas, solução/reabertura, CSRF, origem HTTP, proteção dos arquivos privados e logout.
-
-Foram aprovados os testes automatizados do servidor e a verificação de sintaxe do Python e do JavaScript. O envio SMTP real depende das credenciais da faculdade e não foi exercitado. Não houve validação visual em navegador neste ambiente; confira o demonstrador em computador e celular antes de publicar.
+Os testes usam banco temporário e verificam cadastro/login sem SMTP, domínio institucional, senha incorreta, bloqueio de tentativas, hashes, perfis, diretor único, recuperação local, migração, isolamento dos protocolos, autoria restrita, auditoria, respostas, solução/reabertura, CSRF e logout. As telas precisam de conferência visual em computador e celular antes da publicação.
 ''',
-}  # Finaliza os conteúdos embutidos.
+}
 
 ROOT = Path(__file__).parent  # Localiza a pasta do projeto.
 config = ROOT / '.env'  # Localiza as configurações privadas ao lado deste arquivo.
@@ -1089,13 +1077,20 @@ def initialize():
     os.chmod(DB.parent, 0o700)  # Restringe a pasta ao usuário do servidor.
     with database() as db:  # Confirma todas as alterações de estrutura juntas.
         db.executescript('''
-        CREATE TABLE IF NOT EXISTS codes(email TEXT PRIMARY KEY, hash TEXT NOT NULL, expires REAL NOT NULL, attempts INTEGER NOT NULL, sent REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS accounts(email TEXT PRIMARY KEY, salt TEXT NOT NULL, hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('aluno','supervisor','diretor')), created REAL NOT NULL);
+        CREATE UNIQUE INDEX IF NOT EXISTS one_director ON accounts(role) WHERE role='diretor';
+        CREATE TABLE IF NOT EXISTS auth_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires REAL NOT NULL, csrf TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tickets(id TEXT PRIMARY KEY, email TEXT NOT NULL, anonymous INTEGER NOT NULL, kind TEXT NOT NULL, subject TEXT NOT NULL, sector TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, ticket TEXT NOT NULL REFERENCES tickets(id), author TEXT NOT NULL, body TEXT NOT NULL, created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, ticket TEXT NOT NULL, created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY, hits INTEGER NOT NULL, reset REAL NOT NULL);
         ''')  # Cria autenticação, manifestações, histórico e auditoria.
+        if not db.execute("SELECT 1 FROM auth_meta WHERE key='password_auth_v1'").fetchone():
+            db.execute('DELETE FROM sessions')  # Encerra os acessos antigos por código somente na primeira migração.
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codes'").fetchone():
+                db.execute('DELETE FROM codes')  # Invalida códigos de e-mail antigos sem remover relatos ou auditorias.
+            db.execute("INSERT INTO auth_meta VALUES ('password_auth_v1','1')")  # Evita repetir a migração a cada reinício.
     os.chmod(DB, 0o600)  # Restringe a leitura do arquivo de banco.
 
 
@@ -1103,87 +1098,70 @@ def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()  # Não guarda códigos nem cookies em texto simples.
 
 
+PASSWORD_ITERATIONS = 600000  # Aumenta o custo de adivinhar senhas a partir do banco.
+
+
+def password_hash(password, salt):
+    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), bytes.fromhex(salt), PASSWORD_ITERATIONS).hex()  # Nunca guarda a senha em texto simples.
+
+
+def check_password(password):
+    if not isinstance(password, str) or not 8 <= len(password) <= 128 or not password.strip():
+        raise ValueError('A senha precisa ter entre 8 e 128 caracteres e não pode conter apenas espaços.')  # Usa a mesma regra no site e no menu local.
+
+
+def insert_account(db, email, password, profile):
+    if not INSTITUTIONAL.fullmatch(email) or profile not in ('aluno', 'supervisor', 'diretor'):
+        raise ValueError('Use um e-mail @camporeal.edu.br e um perfil válido.')  # Valida as contas criadas pelo responsável.
+    check_password(password)  # Rejeita senhas curtas ou vazias.
+    salt = secrets.token_hex(16)  # Gera um sal diferente para cada conta.
+    db.execute('INSERT INTO accounts VALUES (?,?,?,?,?)', (email, salt, password_hash(password, salt), profile, time.time()))  # O perfil é determinado pelo servidor ou pelo operador local.
+
+
 def role(email):
-    if email == DIRECTOR:  # Confere a conta definida no servidor.
-        return 'diretor'  # Concede acesso à identidade somente ao diretor.
-    return 'supervisor' if email in SUPERVISORS else 'aluno'  # Os demais são alunos por padrão.
+    with database() as db:
+        account = db.execute('SELECT role FROM accounts WHERE email=?', (email,)).fetchone()  # Consulta o perfil atribuído pelo responsável.
+        if not account:
+            raise Error(401, 'Entre com seu e-mail e senha para continuar.')  # Não aceita sessões sem conta cadastrada.
+        return account['role']  # O usuário não pode escolher outro perfil pela API.
 
 
-class SMTPConfigurationError(ValueError):
-    pass  # Identifica erros locais de configuração sem incluir senhas na mensagem.
-
-
-def smtp_settings():
-    required = ['SMTP_HOST', 'SMTP_FROM']  # Define os campos obrigatórios para qualquer envio.
-    if os.getenv('SMTP_USER', '').strip():  # A senha só é necessária quando existe usuário de autenticação.
-        required.append('SMTP_PASSWORD')
-    missing = [name for name in required if not os.getenv(name, '').strip()]  # Verifica nomes, sem imprimir valores.
-    if missing:
-        location = 'Confira o .env na mesma pasta de ouvidoria.py e reinicie o programa.' if config.exists() else 'Não encontrei o arquivo .env ao lado de ouvidoria.py. Confira se ele não ficou como .env.txt.'  # Orienta onde corrigir.
-        raise SMTPConfigurationError('Configuração SMTP incompleta: ' + ', '.join(missing) + '. ' + location)  # Mostra apenas nomes de campos.
-    try:
-        port = int(os.getenv('SMTP_PORT', '587'))  # Valida a porta antes de tentar conexão.
-        if not 1 <= port <= 65535:
-            raise ValueError  # Recusa números fora da faixa de portas.
-    except ValueError:
-        raise SMTPConfigurationError('SMTP_PORT precisa ser uma porta válida. No Gmail, use 587 com STARTTLS ou 465 com TLS.') from None
-    host = os.environ['SMTP_HOST'].strip()  # Remove espaços no nome do servidor.
-    if '://' in host or '/' in host or ':' in host or any(c.isspace() for c in host):
-        raise SMTPConfigurationError('SMTP_HOST deve conter somente o servidor. No Gmail, use smtp.gmail.com, sem https:// e sem porta.')
-    return host, port  # Retorna somente os parâmetros necessários à conexão.
-
-
-def smtp_error_message(error):
-    if isinstance(error, SMTPConfigurationError):
-        return str(error)  # Os textos dessa classe são criados pelo próprio programa e nunca incluem valores privados.
-    if isinstance(error, smtplib.SMTPAuthenticationError):
-        return 'O servidor recusou o usuário ou a senha SMTP. No Gmail, use uma senha de app do Google, não a senha normal. Confira SMTP_USER e reinicie após editar o .env.'
-    if isinstance(error, smtplib.SMTPRecipientsRefused):
-        return 'O servidor recusou o destinatário. Confira o e-mail institucional e as regras de envio da conta.'
-    if isinstance(error, smtplib.SMTPSenderRefused):
-        return 'O servidor recusou o remetente. No Gmail, SMTP_FROM deve ser o mesmo Gmail de SMTP_USER ou um endereço autorizado na conta.'
-    if isinstance(error, smtplib.SMTPNotSupportedError):
-        return 'O servidor não oferece a conexão segura exigida. Confira SMTP_HOST e SMTP_PORT; no Gmail, use smtp.gmail.com e porta 587 ou 465.'
-    if isinstance(error, ssl.SSLError):
-        return 'Não foi possível validar a conexão TLS do SMTP. Confira a porta, a data do computador e os certificados; não desative a validação de segurança.'
-    if isinstance(error, smtplib.SMTPException):
-        return 'O provedor de e-mail recusou ou interrompeu o envio. Execute python ouvidoria.py --testar-smtp para verificar a conexão e a autenticação.'
-    if isinstance(error, OSError):
-        return 'Não foi possível conectar ao servidor SMTP. Confira internet, firewall, SMTP_HOST e SMTP_PORT. No Gmail, tente a porta 587 ou 465.'
-    return 'Não foi possível enviar o código. Execute python ouvidoria.py --testar-smtp no terminal para verificar a configuração.'  # Não repassa respostas brutas que possam conter dados privados.
-
-
-@contextmanager  # Fecha a conexão mesmo quando autenticação ou envio falhar.
-def smtp_connection():
-    host, port = smtp_settings()  # Valida os parâmetros sem revelar credenciais.
-    context = ssl.create_default_context()  # Exige certificados confiáveis.
-    client = smtplib.SMTP_SSL(host, port, timeout=15, context=context) if port == 465 else smtplib.SMTP(host, port, timeout=15)  # Suporta TLS direto ou STARTTLS.
-    try:
-        if port != 465:
-            client.starttls(context=context)  # Exige criptografia antes de transmitir credenciais.
-        username = os.getenv('SMTP_USER', '').strip()  # Normaliza o usuário da conta de envio.
-        if username:
-            password = os.environ['SMTP_PASSWORD']  # Mantém a senha apenas na memória do processo.
-            if host.lower() == 'smtp.gmail.com':
-                password = password.replace(' ', '')  # Aceita a senha de app do Google copiada com espaços entre os grupos.
-            client.login(username, password)  # Autentica sem registrar a senha nem habilitar logs de protocolo.
-        yield client  # Disponibiliza a conexão autenticada para envio ou diagnóstico.
-    finally:
+def manage_accounts():
+    initialize()  # Prepara as tabelas antes de abrir o menu local.
+    while True:
+        print('\nCONTAS DA OUVIDORIA\n1 - Criar conta\n2 - Redefinir senha\n3 - Listar contas\n0 - Sair')  # Oferece gerenciamento sem SMTP ou painel extra.
+        option = input('Escolha: ').strip()  # Lê uma opção no terminal da instalação.
+        if option == '0':
+            return  # Volta ao terminal sem iniciar o servidor.
         try:
-            client.quit()  # Encerra a conexão educadamente.
-        except (smtplib.SMTPException, OSError):
-            client.close()  # Garante liberação caso o servidor já tenha desconectado.
-
-
-def deliver(email, code):
-    smtp_settings()  # Valida a presença do remetente antes de montar o e-mail.
-    message = EmailMessage()  # Cria uma mensagem de texto.
-    message['Subject'] = 'Seu código de acesso — Ouvidoria Campo Real'  # Define o assunto.
-    message['From'] = os.environ['SMTP_FROM'].strip()  # Usa o remetente configurado, sem espaços externos.
-    message['To'] = email  # Envia somente ao e-mail institucional validado.
-    message.set_content(f'Seu código de acesso é {code}. Ele expira em 10 minutos. Não compartilhe este código. Se não solicitou, ignore esta mensagem.')  # Informa validade.
-    with smtp_connection() as smtp:  # Usa a mesma conexão segura validada pelo diagnóstico.
-        smtp.send_message(message)  # Entrega o código sem registrá-lo em logs.
+            if option == '3':
+                with database() as db:
+                    for row in db.execute('SELECT email,role FROM accounts ORDER BY role,email'):
+                        print(row['role'] + ': ' + row['email'])  # Lista contas sem mostrar senhas ou hashes.
+                continue
+            if option not in ('1', '2'):
+                print('Escolha uma das opções do menu.')
+                continue
+            email = input('E-mail @camporeal.edu.br: ').strip().lower()  # Identifica a conta a criar ou recuperar.
+            profile = {'1': 'aluno', '2': 'supervisor', '3': 'diretor'}.get(input('Perfil: 1-aluno, 2-supervisor, 3-diretor: ').strip()) if option == '1' else None  # Perfil só é escolhido no terminal local.
+            password = getpass.getpass('Nova senha (mínimo 8 caracteres): ')  # Oculta a senha durante a digitação.
+            if password != getpass.getpass('Repita a senha: '):
+                raise ValueError('As senhas não são iguais.')
+            check_password(password)  # Valida antes de gravar qualquer alteração.
+            with database() as db:
+                if option == '1':
+                    insert_account(db, email, password, profile)  # Permite ao operador provisionar as contas com segurança.
+                else:
+                    salt = secrets.token_hex(16)  # Gera um novo sal para a senha redefinida.
+                    changed = db.execute('UPDATE accounts SET salt=?,hash=? WHERE email=?', (salt, password_hash(password, salt), email)).rowcount  # Mantém o perfil e o histórico existentes.
+                    if not changed:
+                        raise ValueError('Conta não encontrada. Use a opção criar conta, caso ainda não exista.')
+                    db.execute('DELETE FROM sessions WHERE email=?', (email,))  # Invalida todas as sessões anteriores após a recuperação.
+            print('Conta criada.' if option == '1' else 'Senha redefinida; os acessos anteriores foram encerrados.')
+        except sqlite3.IntegrityError:
+            print('Essa conta já existe ou já há um diretor cadastrado. É permitido somente um diretor.')  # Não exibe detalhes internos do banco.
+        except ValueError as error:
+            print(str(error))  # Exibe somente validações locais, sem mostrar senhas.
 
 
 class Error(Exception):
@@ -1222,7 +1200,7 @@ class Handler(BaseHTTPRequestHandler):
             token = cookies['cr_session'].value  # Extrai o identificador secreto.
         except (KeyError, ValueError):
             raise Error(401, 'Entre com seu e-mail institucional para continuar.')  # Bloqueia visitantes.
-        row = db.execute('SELECT * FROM sessions WHERE hash=? AND expires>?', (digest(token), time.time())).fetchone()  # Busca uma sessão válida.
+        row = db.execute('SELECT sessions.* FROM sessions JOIN accounts ON accounts.email=sessions.email WHERE sessions.hash=? AND sessions.expires>?', (digest(token), time.time())).fetchone()  # Busca uma sessão válida.
         if not row:  # Rejeita sessões inexistentes ou expiradas.
             raise Error(401, 'Sua sessão expirou. Entre novamente.')
         return dict(row)  # Retorna a identidade validada no servidor.
@@ -1298,37 +1276,34 @@ class Handler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path  # Identifica a operação.
             now = time.time()  # Usa o mesmo horário na operação.
             with database() as db:
-                if path in ('/api/login', '/api/verify'):
-                    self.limit(db, 'ip:' + self.client_address[0], 50, 600)  # Limita tentativas por IP direto.
-                    email = self.text(data, 'email', 1, 254).lower()  # Normaliza o e-mail.
-                    if not INSTITUTIONAL.fullmatch(email):  # Não aceita domínios parecidos ou subdomínios.
-                        raise Error(400, 'Use seu e-mail @camporeal.edu.br.')
-                    if path == '/api/login':
-                        self.limit(db, 'email:' + email, 5, 600)  # Limita envios para cada conta.
-                        previous = db.execute('SELECT sent FROM codes WHERE email=?', (email,)).fetchone()  # Consulta o último envio.
-                        if previous and now - previous['sent'] < 60:
-                            raise Error(429, 'Aguarde 60 segundos antes de pedir outro código.')  # Evita disparos repetidos.
-                        code = f'{secrets.randbelow(1000000):06d}'  # Gera seis números aleatórios.
-                        try:
-                            deliver(email, code)  # Só permite autenticação por e-mail realmente recebido.
-                        except Exception as error:
-                            raise Error(503, smtp_error_message(error)) from None  # Informa a categoria da falha sem expor credenciais ou respostas brutas do SMTP.
-                        db.execute('INSERT OR REPLACE INTO codes VALUES (?,?,?,0,?)', (email, digest(email + code), now + 600, now))  # Guarda código com validade de dez minutos.
-                        return self.success(db, 200, {'ok': True})  # Não devolve o código no HTTP.
-                    supplied = self.text(data, 'code', 6, 6)  # Lê o código digitado.
-                    db.execute('BEGIN IMMEDIATE')  # Serializa verificações para impedir reutilização concorrente.
-                    row = db.execute('SELECT * FROM codes WHERE email=?', (email,)).fetchone()  # Procura o código da conta.
-                    if not row or row['expires'] < now or row['attempts'] >= 5:
-                        raise Error(400, 'Código expirado ou inválido. Solicite outro.')
-                    if not hmac.compare_digest(row['hash'], digest(email + supplied)):
-                        db.execute('UPDATE codes SET attempts=attempts+1 WHERE email=?', (email,))  # Conta cada código incorreto na mesma transação.
-                        db.commit()  # Mantém o contador mesmo retornando erro ao usuário.
-                        raise Error(400, 'Código incorreto. Confira o e-mail recebido.')
-                    db.execute('DELETE FROM codes WHERE email=?', (email,))  # Consome o código de uso único.
-                    db.execute('DELETE FROM sessions WHERE expires<?', (now,))  # Limpa sessões antigas.
-                    token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)  # Gera segredos independentes.
-                    db.execute('INSERT INTO sessions VALUES (?,?,?,?)', (digest(token), email, now + 28800, csrf))  # Sessão dura oito horas.
-                    return self.success(db, 200, {'ok': True}, self.cookie(token, 28800))  # Cria cookie protegido.
+                if path in ('/api/login', '/api/register'):
+                    self.limit(db, 'auth-ip:' + self.client_address[0], 60, 600)  # Limita cadastros e tentativas antes de calcular o hash.
+                    email = self.text(data, 'email', 1, 254).lower()  # Normaliza o endereço institucional.
+                    if not INSTITUTIONAL.fullmatch(email):
+                        raise Error(400, 'Use seu e-mail @camporeal.edu.br.')  # Exige o domínio completo, sem sufixos parecidos.
+                    self.limit(db, 'auth-email:' + email, 15, 600)  # Limita tentativas para a mesma conta.
+                    password = data.get('password')  # Não remove espaços de senhas escolhidas pelo usuário.
+                    try:
+                        check_password(password)  # Aplica o mesmo tamanho permitido em cadastro e acesso.
+                    except ValueError as error:
+                        raise Error(400, str(error)) from None
+                    if path == '/api/register':
+                        db.execute('BEGIN IMMEDIATE')  # Serializa a verificação e o cadastro da conta.
+                        exists = db.execute('SELECT 1 FROM accounts WHERE email=?', (email,)).fetchone()  # Impede sobrescrever contas existentes.
+                        legacy = db.execute('SELECT 1 FROM tickets WHERE email=? LIMIT 1', (email,)).fetchone()  # Protege relatos de usuários da versão anterior.
+                        if exists or legacy or email == DIRECTOR or email in SUPERVISORS:
+                            raise Error(409, 'Conta existente ou reservada. Entre com sua senha ou peça ao responsável para criar ou recuperar a conta.')
+                        insert_account(db, email, password, 'aluno')  # Ignora qualquer perfil enviado pelo navegador; cadastro público é sempre aluno.
+                    else:
+                        account = db.execute('SELECT * FROM accounts WHERE email=?', (email,)).fetchone()  # Busca o hash da conta solicitada.
+                        salt = account['salt'] if account else '0' * 32  # Usa um cálculo equivalente para endereços não cadastrados.
+                        candidate = password_hash(password, salt)  # Confere a senha sem armazená-la.
+                        if not account or not hmac.compare_digest(account['hash'], candidate):
+                            raise Error(401, 'E-mail ou senha incorretos. No primeiro acesso, crie sua conta de aluno.')  # Não distingue senha errada de conta inexistente.
+                    db.execute('DELETE FROM sessions WHERE expires<?', (now,))  # Remove sessões antigas.
+                    token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)  # Gera segredos novos após cada autenticação.
+                    db.execute('INSERT INTO sessions VALUES (?,?,?,?)', (digest(token), email, now + 28800, csrf))  # Mantém o acesso por oito horas.
+                    return self.success(db, 201 if path == '/api/register' else 200, {'ok': True}, self.cookie(token, 28800))  # Confirma a transação antes de autenticar o navegador.
                 session = self.session(db)  # Exige login para as operações seguintes.
                 if not hmac.compare_digest(self.headers.get('X-CSRF-Token', ''), session['csrf']):
                     raise Error(403, 'Atualize a página e tente novamente.')  # Impede uso de sessão sem token CSRF.
@@ -1388,24 +1363,18 @@ if __name__ == '__main__':
         if option in ('--ajuda', '--help', '-h'):  # Disponibiliza instruções sem conexão externa.
             print(__doc__)  # Mostra a ajuda incluída no início do programa.
             raise SystemExit(0)  # Finaliza normalmente.
-        if option == '--testar-smtp':  # Testa a configuração sem enviar e-mails nem criar códigos de acesso.
+        if option == '--contas':  # Permite criar equipe ou redefinir senhas apenas no computador responsável pela instalação.
             try:
-                with smtp_connection() as smtp:  # Verifica conexão, TLS e autenticação quando configurada.
-                    status, _ = smtp.noop()  # Consulta se a sessão SMTP está ativa, sem remeter uma mensagem.
-                    if status != 250:
-                        raise smtplib.SMTPResponseException(status, b'Falha na verificacao SMTP')  # Não imprime a resposta bruta do provedor.
-            except Exception as error:
-                print('Falha no teste SMTP:', smtp_error_message(error))  # Mostra somente uma orientação segura para compartilhar.
-                raise SystemExit(1) from None  # Sinaliza falha sem despejar rastreamento nem credenciais.
-            print('Conexão SMTP segura concluída' + (' e autenticação aceita.' if os.getenv('SMTP_USER', '').strip() else '; autenticação não configurada.'))  # Distingue conexão de autenticação efetiva.
-            print('Nenhum e-mail foi enviado. Este teste não confirma entrega ao destinatário nem permissão do remetente.')  # Explica o alcance exato do diagnóstico.
-            raise SystemExit(0)  # Finaliza o teste sem iniciar o servidor.
+                manage_accounts()  # Abre o menu local sem exigir credenciais SMTP.
+            except (EOFError, KeyboardInterrupt):
+                print('\nMenu encerrado.')  # Sai sem expor rastreamentos ao interromper a digitação.
+            raise SystemExit(0)
         if option == '--configurar':  # Cria o modelo de configuração sem sobrescrever credenciais existentes.
             target = ROOT / '.env.example'  # Define o nome do modelo.
             if not target.exists():  # Preserva modelos que já tenham sido editados.
                 target.write_text(ASSETS['configuracao.env.example'], encoding='utf-8')  # Grava os parâmetros necessários.
             print('Modelo disponível em:', target)  # Explica onde encontrar as opções.
-            print('Copie para .env, preencha SMTP e contas autorizadas e execute novamente sem opções.')  # Orienta a instalação.
+            print('Configuração opcional de endereço e porta. Não é necessário configurar SMTP.')  # Orienta a instalação.
             raise SystemExit(0)  # Não inicia o servidor antes da configuração.
         if option == '--demo':  # Mostra somente uma prévia com contas e relatos fictícios.
             import webbrowser  # Abre o navegador padrão do computador.
@@ -1414,15 +1383,9 @@ if __name__ == '__main__':
             print('Demonstração fictícia salva em:', target)  # Informa a localização caso o navegador não abra.
             webbrowser.open(target.resolve().as_uri())  # Abre a página local para explorar os perfis.
             raise SystemExit(0)  # Não cria sessão, banco ou acesso de produção.
-        raise SystemExit('Opção desconhecida. Use --ajuda, --demo, --configurar ou --testar-smtp.')  # Rejeita argumentos digitados por engano.
-    if not os.getenv('SMTP_HOST') or not os.getenv('SMTP_FROM'):  # Informa a configuração pendente antes do primeiro acesso.
-        print('Para login real, configure SMTP: python ouvidoria.py --configurar')  # Explica por que um código não seria enviado.
-        print('Para explorar com dados fictícios: python ouvidoria.py --demo')  # Oferece um modo de apresentação separado.
-    if DIRECTOR and not INSTITUTIONAL.fullmatch(DIRECTOR):
-        raise SystemExit('DIRECTOR_EMAIL deve ser uma única conta @camporeal.edu.br.')  # Impede configuração de diretor externo.
-    if any(not INSTITUTIONAL.fullmatch(email) for email in SUPERVISORS):
-        raise SystemExit('Todos os supervisores devem usar @camporeal.edu.br.')  # Valida a equipe.
+        raise SystemExit('Opção desconhecida. Use --ajuda, --demo, --configurar ou --contas.')  # Rejeita argumentos digitados por engano.
     initialize()  # Prepara o banco na primeira execução.
     host, port = os.getenv('HOST', '127.0.0.1'), int(os.getenv('PORT', '8000'))  # Escuta apenas no computador local por padrão.
+    print('Para criar supervisor/diretor ou redefinir senha: python ouvidoria.py --contas')  # Orienta o responsável pela instalação.
     print(f'Ouvidoria disponível em {APP_URL}. Use Ctrl+C para parar.')  # Não imprime segredos.
     ThreadingHTTPServer((host, port), Handler).serve_forever()  # Mantém o servidor ativo.
