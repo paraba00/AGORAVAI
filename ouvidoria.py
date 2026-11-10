@@ -34,7 +34,7 @@ const $ = id => document.getElementById(id); // Facilita localizar elementos pel
 const DEMO = location.protocol === 'file:'; // Ativa o demonstrador somente quando o arquivo é aberto diretamente.
 const statuses = ['Recebida', 'Em análise', 'Respondida', 'Resolvida']; // Define a ordem das situações.
 const demoEmails = {aluno:'aluno.exemplo@camporeal.edu.br',supervisor:'supervisor.exemplo@camporeal.edu.br',diretor:'diretor.exemplo@camporeal.edu.br'}; // Contas fictícias, sem validade no servidor.
-let user = null, tickets = [], activeId = null, registerMode = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
+let user = null, tickets = [], activeId = null, registerMode = false, archiveView = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); // Impede que relatos sejam interpretados como HTML.
 const date = value => new Date(value * 1000).toLocaleString('pt-BR', {timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}); // Mostra datas no horário de Brasília.
 const badge = status => `<span class="badge ${['','analysis','answered','solved'][statuses.indexOf(status)] || ''}">${escapeHTML(status)}</span>`; // Gera o marcador de situação.
@@ -69,17 +69,18 @@ function seedDemo() { // Cria manifestações fictícias para explorar as telas.
 async function demoAPI(path, data) { // Reproduz o fluxo com dados locais; não substitui a API protegida.
   if (path === '/api/me') { if (!user) throw new Error('Entre para continuar.'); return user; } // Retorna o perfil fictício atual.
   if (path === '/api/logout') { user = null; return {ok:true}; } // Encerra a demonstração da sessão.
-  const list = demoData(); // Recupera os protocolos locais.
+  const list = demoData().map(t => ({...t, archived: t.archived ?? (t.status === 'Resolvida')})); // Recupera os protocolos locais.
   if (path === '/api/tickets' && !data) return list.filter(t => user.role !== 'aluno' || t.email === user.email).map(t => ({...t,identity:!t.anonymous || user.role === 'aluno' ? t.email : null,email:undefined})); // Oculta dados no fluxo de demonstração.
   if (path === '/api/tickets') { // Registra um exemplo de manifestação.
-    const item = {...data,id:'CR-DEMO-' + Math.random().toString(16).slice(2,10).toUpperCase(),email:user.email,created:Date.now()/1000,status:'Recebida',messages:[]}; // Associa a conta fictícia.
+    const item = {...data,id:'CR-DEMO-' + Math.random().toString(16).slice(2,10).toUpperCase(),email:user.email,created:Date.now()/1000,status:'Recebida',archived:false,messages:[]}; // Associa a conta fictícia.
     list.unshift(item); saveDemo(list); return {id:item.id}; // Persiste o exemplo.
   }
   const item = list.find(t => t.id === data.id); // Localiza o protocolo selecionado.
   if (!item) throw new Error('Protocolo não encontrado.'); // Trata exemplos removidos.
   if (path === '/api/identity') { if(user.role !== 'diretor') throw new Error('Somente o diretor pode consultar.'); return {email:item.email}; } // Demonstra a consulta restrita.
-  if (path === '/api/reply') { item.messages.push({author:user.role === 'aluno' ? 'Aluno' : 'Ouvidoria Campo Real',body:data.body,created:Date.now()/1000}); item.status = user.role === 'aluno' ? 'Em análise' : 'Respondida'; } // Acrescenta uma mensagem fictícia.
-  if (path === '/api/status') { item.status = data.status; item.messages.push({author:'Sistema',body:'Situação alterada para ' + data.status.toLowerCase() + '.',created:Date.now()/1000}); } // Registra o andamento do exemplo.
+  if (path === '/api/reply') { item.archived = false; item.messages.push({author:user.role === 'aluno' ? 'Aluno' : 'Ouvidoria Campo Real',body:data.body,created:Date.now()/1000}); item.status = user.role === 'aluno' ? 'Em análise' : 'Respondida'; } // Acrescenta uma mensagem fictícia.
+  if (path === '/api/status') { item.archived = data.status === 'Resolvida'; item.status = data.status; item.messages.push({author:'Sistema',body:'Situação alterada para ' + data.status.toLowerCase() + '.',created:Date.now()/1000}); } // Registra o andamento do exemplo.
+  if (path === '/api/archive') { if (user.role === 'aluno') throw new Error('Somente a equipe pode arquivar.'); item.archived = data.archived; item.status = data.archived ? 'Resolvida' : 'Em análise'; item.messages.push({author:'Sistema',body:data.archived ? 'Manifestação resolvida e arquivada pelo atendimento.' : 'Manifestação desarquivada para nova análise.',created:Date.now()/1000}); } // Demonstra o arquivo compartilhado da equipe.
   saveDemo(list); return {ok:true}; // Confirma a alteração local.
 }
 async function api(path, data) { // Centraliza a comunicação com o servidor real ou a prévia.
@@ -93,7 +94,7 @@ async function api(path, data) { // Centraliza a comunicação com o servidor re
   return result; // Entrega os dados autorizados.
 }
 function loggedOut() { // Restaura a apresentação pública.
-  user = null; tickets = []; activeId = null; resetLogin(); // Descarta dados privados da memória da tela.
+  user = null; tickets = []; activeId = null; archiveView = false; resetLogin(); $('sectorFilter').value = ''; $('search').value = ''; $('statusFilter').value = ''; // Descarta dados privados da memória da tela.
   $('workspace').hidden = true; $('welcome').hidden = false; $('how').hidden = false; // Mostra a entrada.
   $('account').replaceChildren(); $('ticketList').replaceChildren(); $('detailContent').replaceChildren(); // Limpa os dados exibidos.
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); // Fecha janelas privadas.
@@ -104,6 +105,7 @@ async function loggedIn() { // Monta a área do perfil autenticado.
   $('panelLabel').textContent = student ? 'ÁREA DO ALUNO' : 'GESTÃO DA OUVIDORIA'; // Nomeia a área atual.
   $('panelTitle').textContent = student ? 'Minhas manifestações' : 'Central de manifestações'; // Adapta o título ao perfil.
   $('panelDescription').textContent = student ? 'Acompanhe cada conversa, do primeiro contato à solução.' : 'Acolha os relatos, acompanhe os protocolos e responda aos alunos.'; // Explica a tarefa principal.
+  archiveView = false; $('archivedTab').hidden = student; $('sectorFilterField').hidden = student; $('sectorFilter').value = ''; $('search').value = ''; $('statusFilter').value = ''; // Limpa filtros ao trocar de perfil e mostra os controles somente à equipe.
   $('newTicket').hidden = !student; // Restringe a criação ao perfil de aluno na interface.
   $('account').innerHTML = `<strong>${escapeHTML(user.role)}</strong><span>${escapeHTML(user.email)}</span> <button class="text-button" id="logout" type="button">Sair</button>`; // Mostra os dados da própria sessão.
   $('logout').onclick = event => busy(event.currentTarget, async () => {await api('/api/logout', {}); loggedOut();}); // Invalida a sessão no servidor.
@@ -112,12 +114,19 @@ async function loggedIn() { // Monta a área do perfil autenticado.
 async function refresh() { // Atualiza os protocolos e os indicadores.
   tickets = await api('/api/tickets'); // Recebe apenas registros permitidos pelo servidor.
   $('stats').innerHTML = [['Total de manifestações',tickets.length],['Em atendimento',tickets.filter(t => ['Recebida','Em análise'].includes(t.status)).length],['Respondidas',tickets.filter(t => t.status === 'Respondida').length],['Resolvidas',tickets.filter(t => t.status === 'Resolvida').length]].map(([label,count]) => `<div class="stat"><strong>${count}</strong><span>${label}</span></div>`).join(''); // Resume os registros recebidos.
+  const selectedSector = $('sectorFilter').value; // Mantém o filtro ativo após responder ou arquivar.
+  const sectors = [...new Set([...Array.from($('sector').options, option => option.value), ...tickets.map(t => t.sector)])].sort((a,b) => a.localeCompare(b, 'pt-BR')); // Inclui as áreas do formulário e áreas antigas do banco.
+  $('sectorFilter').innerHTML = '<option value="">Todas as áreas</option>' + sectors.map(sector => `<option value="${escapeHTML(sector)}">${escapeHTML(sector)}</option>`).join(''); // Escapa os textos antes de montar as opções.
+  $('sectorFilter').value = selectedSector; // Preserva a área escolhida nas duas abas.
   renderList(); // Reaplica os filtros atuais.
 }
 function renderList() { // Exibe resultados de busca e situação.
   const search = $('search').value.trim().toLocaleLowerCase('pt-BR'); // Normaliza a consulta digitada.
-  const filtered = tickets.filter(t => (! $('statusFilter').value || t.status === $('statusFilter').value) && (t.subject + ' ' + t.id).toLocaleLowerCase('pt-BR').includes(search)); // Combina os filtros.
-  $('ticketList').innerHTML = filtered.length ? filtered.map(t => `<button type="button" class="ticket-card" data-ticket="${escapeHTML(t.id)}"><div><span class="protocol">${escapeHTML(t.id)}</span><h3>${escapeHTML(t.subject)}</h3><span class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${t.anonymous ? 'Identidade restrita ao diretor' : 'Manifestação identificada'}</span></div>${badge(t.status)}</button>`).join('') : '<div class="empty"><h3>Nenhuma manifestação por aqui.</h3><p>Crie uma nova manifestação ou ajuste os filtros.</p></div>'; // Exibe cartões ou um estado vazio.
+  const staff = user?.role !== 'aluno'; // O aluno continua consultando todos os próprios protocolos, inclusive resolvidos.
+  $('allTab').classList.toggle('active', !archiveView); $('archivedTab').classList.toggle('active', archiveView); // Destaca a aba atual.
+  $('allTab').setAttribute('aria-pressed', String(!archiveView)); $('archivedTab').setAttribute('aria-pressed', String(archiveView)); // Anuncia a escolha a leitores de tela.
+  const filtered = tickets.filter(t => (!staff || Boolean(t.archived) === archiveView) && (!staff || !$('sectorFilter').value || t.sector === $('sectorFilter').value) && (!$('statusFilter').value || t.status === $('statusFilter').value) && (t.subject + ' ' + t.id).toLocaleLowerCase('pt-BR').includes(search)); // Combina aba, área, situação e busca sem alterar permissões de acesso.
+  $('ticketList').innerHTML = filtered.length ? filtered.map(t => `<button type="button" class="ticket-card" data-ticket="${escapeHTML(t.id)}"><div><span class="protocol">${escapeHTML(t.id)}</span><h3>${escapeHTML(t.subject)}</h3><span class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${t.anonymous ? 'Identidade restrita ao diretor' : 'Manifestação identificada'}</span></div>${badge(t.status)}${t.archived ? '<span class="badge">Arquivada</span>' : ''}</button>`).join('') : `<div class="empty"><h3>${archiveView ? 'Nenhuma manifestação arquivada nesta busca.' : 'Nenhuma manifestação por aqui.'}</h3><p>Ajuste os filtros${staff ? ' ou consulte a outra aba' : ' ou crie uma nova manifestação'}.</p></div>`; // Exibe cartões ou um estado vazio.
 }
 function showDetail(id) { // Abre o histórico do protocolo selecionado.
   activeId = id; // Guarda o alvo das próximas ações.
@@ -125,19 +134,21 @@ function showDetail(id) { // Abre o histórico do protocolo selecionado.
   if (!t) return; // Evita abrir um protocolo ausente.
   $('detailProtocol').textContent = t.id; $('detailSubject').textContent = t.subject; // Usa texto simples para protocolo e título.
   const identity = t.anonymous ? 'Identidade restrita ao diretor' : `Identificado: ${t.identity || ''}`; // Não tenta deduzir o autor anônimo.
-  $('detailContent').innerHTML = `${badge(t.status)}<p class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${escapeHTML(identity)}</p><p class="detail-body">${escapeHTML(t.body)}</p><h3>Histórico de atendimento</h3>${t.messages.length ? t.messages.map(m => `<div class="message ${m.author === 'Ouvidoria Campo Real' ? 'staff' : ''}"><strong>${escapeHTML(m.author)}</strong><span class="meta"> · ${date(m.created)}</span><p>${escapeHTML(m.body)}</p></div>`).join('') : '<p class="form-note">Aguardando atendimento. As respostas aparecerão aqui.</p>'}`; // Exibe relatos como texto escapado.
+  $('detailContent').innerHTML = `${badge(t.status)}${t.archived ? ' <span class="badge">Arquivada</span>' : ''}<p class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${escapeHTML(identity)}</p><p class="detail-body">${escapeHTML(t.body)}</p><h3>Histórico de atendimento</h3>${t.messages.length ? t.messages.map(m => `<div class="message ${m.author === 'Ouvidoria Campo Real' ? 'staff' : ''}"><strong>${escapeHTML(m.author)}</strong><span class="meta"> · ${date(m.created)}</span><p>${escapeHTML(m.body)}</p></div>`).join('') : '<p class="form-note">Aguardando atendimento. As respostas aparecerão aqui.</p>'}`; // Exibe relatos como texto escapado.
   $('detailActions').replaceChildren(); // Limpa ações e identidades reveladas em aberturas anteriores.
   if (user.role === 'aluno') { // Mostra as ações de confirmação do aluno.
     action(t.status === 'Resolvida' ? 'Pedir nova análise' : '✓ Foi resolvido', () => updateStatus(t.status === 'Resolvida' ? 'Em análise' : 'Resolvida')); // Permite encerrar ou reabrir o atendimento.
     if (t.status === 'Respondida') action('Ainda não foi resolvido', () => updateStatus('Em análise')); // Permite contestar a solução proposta.
   } else { // Mostra as ações de atendimento.
-    action('Marcar em análise', () => updateStatus('Em análise')); // Atualiza o andamento institucional.
+    if (t.archived) action('Desarquivar e retomar atendimento', () => updateArchive(false)); // Retoma sem perder nenhuma mensagem.
+    else { action('Marcar em análise', () => updateStatus('Em análise')); action('Resolver e arquivar', () => updateArchive(true)); } // A conclusão pela equipe arquiva automaticamente. // Atualiza o andamento institucional.
     if (user.role === 'diretor' && t.anonymous) action('Consultar autoria restrita', async () => { // Exige consulta explícita do diretor.
       const result = await api('/api/identity', {id:activeId}); // O servidor autoriza e registra a consulta.
       const note = document.createElement('p'); note.className = 'form-note'; note.textContent = `Autoria: ${result.email}. Consulta registrada${DEMO ? ' apenas ilustrativa na demonstração' : ' na auditoria do servidor'}.`; // Mostra a identidade sem inserir HTML.
       $('detailActions').append(note); // Mantém a informação dentro da janela atual.
     });
   }
+  $('replyForm').hidden = user.role !== 'aluno' && Boolean(t.archived); // A equipe retoma antes de enviar outra resposta; o aluno ainda pode complementar.
   $('replyForm').reset(); // Remove rascunhos de outros protocolos.
   if (!$('detailDialog').open) $('detailDialog').showModal(); // Usa uma janela com foco controlado pelo navegador.
 }
@@ -147,6 +158,10 @@ function action(label, handler) { // Cria um botão de ação sem eventos HTML e
 }
 async function updateStatus(status) { // Solicita a alteração autorizada de situação.
   await api('/api/status', {id:activeId,status}); await refresh(); showDetail(activeId); notify('Situação atualizada.'); // Recarrega o estado confirmado pelo servidor.
+}
+async function updateArchive(archived) { // Resolve e arquiva ou retoma uma manifestação na fila compartilhada da equipe.
+  await api('/api/archive', {id:activeId,archived}); await refresh(); $('detailDialog').close(); // A mudança só aparece depois da confirmação do servidor.
+  notify(archived ? 'Manifestação resolvida e movida para Arquivadas.' : 'Manifestação desarquivada e devolvida ao atendimento.'); // Indica em qual aba encontrar o protocolo.
 }
 function setRegisterMode(enabled) { // Alterna entre entrar e criar conta, sem segunda etapa por e-mail.
   registerMode = enabled; $('confirmField').hidden = !enabled; $('confirmPassword').required = enabled; // Solicita confirmação somente no cadastro.
@@ -184,8 +199,9 @@ $('replyForm').onsubmit = event => { // Envia uma resposta ou complemento.
   busy(event.submitter, async () => { await api('/api/reply', {id:activeId,body:$('replyBody').value.trim()}); await refresh(); showDetail(activeId); notify('Mensagem enviada.'); }); // Atualiza o histórico após confirmação.
 };
 $('ticketList').onclick = event => { const card = event.target.closest('[data-ticket]'); if (card) showDetail(card.dataset.ticket); }; // Abre o cartão clicado.
-$('search').oninput = renderList; $('statusFilter').onchange = renderList; // Reaplica filtros ao editar os controles.
-$('allTab').onclick = () => { $('search').value = ''; $('statusFilter').value = ''; renderList(); }; // Restaura todos os protocolos.
+$('search').oninput = renderList; $('statusFilter').onchange = renderList; $('sectorFilter').onchange = renderList; // Reaplica filtros ao editar os controles.
+$('allTab').onclick = () => { archiveView = false; renderList(); }; // Volta à lista principal preservando os filtros.
+$('archivedTab').onclick = () => { if (user?.role === 'aluno') return; archiveView = true; renderList(); }; // Permite consultar o arquivo somente na interface da equipe.
 document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => $(button.dataset.close).close()); // Liga os botões de fechar às janelas.
 if (DEMO) { // Configura somente o arquivo de demonstração.
   $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; $('password').required = false; // Identifica claramente a simulação.
@@ -258,7 +274,7 @@ if (DEMO) { // Configura somente o arquivo de demonstração.
 <section id="workspace" class="workspace" hidden> <!-- Mostra o painel após o login. -->
 <div class="workspace-heading"><div><span id="panelLabel" class="eyebrow">ÁREA DO ALUNO</span><h1 id="panelTitle">Minhas manifestações</h1><p id="panelDescription">Acompanhe cada conversa, do primeiro contato à solução.</p></div><button id="newTicket" class="button primary" type="button">＋ Nova manifestação</button></div> <!-- Apresenta o painel apropriado ao perfil. -->
 <div id="stats" class="stats"></div> <!-- Resume os protocolos por situação. -->
-<div class="toolbar"><div class="tabs"><button id="allTab" class="tab active" type="button">Todas as manifestações</button></div><div class="filters"><label class="sr-only" for="search">Buscar manifestações</label><input id="search" type="search" placeholder="Buscar assunto ou protocolo"><label class="sr-only" for="statusFilter">Filtrar situação</label><select id="statusFilter"><option value="">Todas as situações</option><option>Recebida</option><option>Em análise</option><option>Respondida</option><option>Resolvida</option></select></div></div> <!-- Permite localizar manifestações. -->
+<div class="toolbar"><div class="tabs" role="group" aria-label="Listas de manifestações"><button id="allTab" class="tab active" type="button" aria-pressed="true">Todas as manifestações</button><button id="archivedTab" class="tab" type="button" aria-pressed="false" hidden>Arquivadas</button></div><div class="filters"><div id="sectorFilterField" hidden><label class="sr-only" for="sectorFilter">Filtrar área da manifestação</label><select id="sectorFilter"><option value="">Todas as áreas</option></select></div><label class="sr-only" for="search">Buscar manifestações</label><input id="search" type="search" placeholder="Buscar assunto ou protocolo"><label class="sr-only" for="statusFilter">Filtrar situação</label><select id="statusFilter"><option value="">Todas as situações</option><option>Recebida</option><option>Em análise</option><option>Respondida</option><option>Resolvida</option></select></div></div> <!-- Permite localizar manifestações. -->
 <div id="ticketList" class="ticket-list"></div> <!-- Recebe a lista filtrada. -->
 </section>
 <section id="how" class="how"><div><span class="eyebrow">SIMPLES, DO COMEÇO AO FIM</span><h2>Da sua voz à nossa ação.</h2></div><div class="how-step"><span>01</span><h3>Conte o que aconteceu</h3><p>Escolha o tipo de manifestação e compartilhe seu relato.</p></div><div class="how-step"><span>02</span><h3>Acompanhe a resposta</h3><p>Consulte o protocolo e converse com a ouvidoria.</p></div><div class="how-step"><span>03</span><h3>Ajude a concluir</h3><p>Informe se foi resolvido ou peça uma nova análise.</p></div></section> <!-- Explica o fluxo de atendimento. -->
@@ -485,6 +501,21 @@ dialog::backdrop { background:#052c46a6; }
 
 /* Facilita encontrar os atalhos da conta abaixo do botão principal. */
 #toggleRegister,#forgotPassword { display:block; text-align:left; margin-top:8px; }
+
+/* Permite alternar as abas e combinar três filtros em telas menores. */
+.tabs { display:flex; flex-wrap:wrap; gap:14px; }
+/* Marca somente a aba selecionada com a cor de detalhe. */
+.tab { border-bottom-color:transparent; }
+/* Mantém um indicador visível de seleção. */
+.tab.active { border-bottom-color:var(--yellow); }
+/* Evita que a área aumente a barra além da tela. */
+.filters { flex-wrap:wrap; }
+/* Mantém o seletor de área legível entre os demais filtros. */
+#sectorFilterField { min-width:170px; flex:1; }
+/* Permite que os indicadores de arquivamento se ajustem no celular. */
+.ticket-card { flex-wrap:wrap; }
+/* Evita esticar campos para fora do painel em telas pequenas. */
+@media(max-width:650px) { #sectorFilterField { width:100%; } }
 ''',
     # Conteúdo comentado de DEMONSTRACAO.html.
     'DEMONSTRACAO.html': r'''<!doctype html> <!-- Usa o padrão HTML atual. -->
@@ -698,6 +729,21 @@ dialog::backdrop { background:#052c46a6; }
 /* Facilita encontrar os atalhos da conta abaixo do botão principal. */
 #toggleRegister,#forgotPassword { display:block; text-align:left; margin-top:8px; }
 
+/* Permite alternar as abas e combinar três filtros em telas menores. */
+.tabs { display:flex; flex-wrap:wrap; gap:14px; }
+/* Marca somente a aba selecionada com a cor de detalhe. */
+.tab { border-bottom-color:transparent; }
+/* Mantém um indicador visível de seleção. */
+.tab.active { border-bottom-color:var(--yellow); }
+/* Evita que a área aumente a barra além da tela. */
+.filters { flex-wrap:wrap; }
+/* Mantém o seletor de área legível entre os demais filtros. */
+#sectorFilterField { min-width:170px; flex:1; }
+/* Permite que os indicadores de arquivamento se ajustem no celular. */
+.ticket-card { flex-wrap:wrap; }
+/* Evita esticar campos para fora do painel em telas pequenas. */
+@media(max-width:650px) { #sectorFilterField { width:100%; } }
+
 </style> <!-- Carrega as cores e o layout. -->
  <!-- Executa as interações depois de carregar o HTML. -->
 </head>
@@ -728,7 +774,7 @@ dialog::backdrop { background:#052c46a6; }
 <section id="workspace" class="workspace" hidden> <!-- Mostra o painel após o login. -->
 <div class="workspace-heading"><div><span id="panelLabel" class="eyebrow">ÁREA DO ALUNO</span><h1 id="panelTitle">Minhas manifestações</h1><p id="panelDescription">Acompanhe cada conversa, do primeiro contato à solução.</p></div><button id="newTicket" class="button primary" type="button">＋ Nova manifestação</button></div> <!-- Apresenta o painel apropriado ao perfil. -->
 <div id="stats" class="stats"></div> <!-- Resume os protocolos por situação. -->
-<div class="toolbar"><div class="tabs"><button id="allTab" class="tab active" type="button">Todas as manifestações</button></div><div class="filters"><label class="sr-only" for="search">Buscar manifestações</label><input id="search" type="search" placeholder="Buscar assunto ou protocolo"><label class="sr-only" for="statusFilter">Filtrar situação</label><select id="statusFilter"><option value="">Todas as situações</option><option>Recebida</option><option>Em análise</option><option>Respondida</option><option>Resolvida</option></select></div></div> <!-- Permite localizar manifestações. -->
+<div class="toolbar"><div class="tabs" role="group" aria-label="Listas de manifestações"><button id="allTab" class="tab active" type="button" aria-pressed="true">Todas as manifestações</button><button id="archivedTab" class="tab" type="button" aria-pressed="false" hidden>Arquivadas</button></div><div class="filters"><div id="sectorFilterField" hidden><label class="sr-only" for="sectorFilter">Filtrar área da manifestação</label><select id="sectorFilter"><option value="">Todas as áreas</option></select></div><label class="sr-only" for="search">Buscar manifestações</label><input id="search" type="search" placeholder="Buscar assunto ou protocolo"><label class="sr-only" for="statusFilter">Filtrar situação</label><select id="statusFilter"><option value="">Todas as situações</option><option>Recebida</option><option>Em análise</option><option>Respondida</option><option>Resolvida</option></select></div></div> <!-- Permite localizar manifestações. -->
 <div id="ticketList" class="ticket-list"></div> <!-- Recebe a lista filtrada. -->
 </section>
 <section id="how" class="how"><div><span class="eyebrow">SIMPLES, DO COMEÇO AO FIM</span><h2>Da sua voz à nossa ação.</h2></div><div class="how-step"><span>01</span><h3>Conte o que aconteceu</h3><p>Escolha o tipo de manifestação e compartilhe seu relato.</p></div><div class="how-step"><span>02</span><h3>Acompanhe a resposta</h3><p>Consulte o protocolo e converse com a ouvidoria.</p></div><div class="how-step"><span>03</span><h3>Ajude a concluir</h3><p>Informe se foi resolvido ou peça uma nova análise.</p></div></section> <!-- Explica o fluxo de atendimento. -->
@@ -755,7 +801,7 @@ const $ = id => document.getElementById(id); // Facilita localizar elementos pel
 const DEMO = location.protocol === 'file:'; // Ativa o demonstrador somente quando o arquivo é aberto diretamente.
 const statuses = ['Recebida', 'Em análise', 'Respondida', 'Resolvida']; // Define a ordem das situações.
 const demoEmails = {aluno:'aluno.exemplo@camporeal.edu.br',supervisor:'supervisor.exemplo@camporeal.edu.br',diretor:'diretor.exemplo@camporeal.edu.br'}; // Contas fictícias, sem validade no servidor.
-let user = null, tickets = [], activeId = null, registerMode = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
+let user = null, tickets = [], activeId = null, registerMode = false, archiveView = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
 const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); // Impede que relatos sejam interpretados como HTML.
 const date = value => new Date(value * 1000).toLocaleString('pt-BR', {timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}); // Mostra datas no horário de Brasília.
 const badge = status => `<span class="badge ${['','analysis','answered','solved'][statuses.indexOf(status)] || ''}">${escapeHTML(status)}</span>`; // Gera o marcador de situação.
@@ -790,17 +836,18 @@ function seedDemo() { // Cria manifestações fictícias para explorar as telas.
 async function demoAPI(path, data) { // Reproduz o fluxo com dados locais; não substitui a API protegida.
   if (path === '/api/me') { if (!user) throw new Error('Entre para continuar.'); return user; } // Retorna o perfil fictício atual.
   if (path === '/api/logout') { user = null; return {ok:true}; } // Encerra a demonstração da sessão.
-  const list = demoData(); // Recupera os protocolos locais.
+  const list = demoData().map(t => ({...t, archived: t.archived ?? (t.status === 'Resolvida')})); // Recupera os protocolos locais.
   if (path === '/api/tickets' && !data) return list.filter(t => user.role !== 'aluno' || t.email === user.email).map(t => ({...t,identity:!t.anonymous || user.role === 'aluno' ? t.email : null,email:undefined})); // Oculta dados no fluxo de demonstração.
   if (path === '/api/tickets') { // Registra um exemplo de manifestação.
-    const item = {...data,id:'CR-DEMO-' + Math.random().toString(16).slice(2,10).toUpperCase(),email:user.email,created:Date.now()/1000,status:'Recebida',messages:[]}; // Associa a conta fictícia.
+    const item = {...data,id:'CR-DEMO-' + Math.random().toString(16).slice(2,10).toUpperCase(),email:user.email,created:Date.now()/1000,status:'Recebida',archived:false,messages:[]}; // Associa a conta fictícia.
     list.unshift(item); saveDemo(list); return {id:item.id}; // Persiste o exemplo.
   }
   const item = list.find(t => t.id === data.id); // Localiza o protocolo selecionado.
   if (!item) throw new Error('Protocolo não encontrado.'); // Trata exemplos removidos.
   if (path === '/api/identity') { if(user.role !== 'diretor') throw new Error('Somente o diretor pode consultar.'); return {email:item.email}; } // Demonstra a consulta restrita.
-  if (path === '/api/reply') { item.messages.push({author:user.role === 'aluno' ? 'Aluno' : 'Ouvidoria Campo Real',body:data.body,created:Date.now()/1000}); item.status = user.role === 'aluno' ? 'Em análise' : 'Respondida'; } // Acrescenta uma mensagem fictícia.
-  if (path === '/api/status') { item.status = data.status; item.messages.push({author:'Sistema',body:'Situação alterada para ' + data.status.toLowerCase() + '.',created:Date.now()/1000}); } // Registra o andamento do exemplo.
+  if (path === '/api/reply') { item.archived = false; item.messages.push({author:user.role === 'aluno' ? 'Aluno' : 'Ouvidoria Campo Real',body:data.body,created:Date.now()/1000}); item.status = user.role === 'aluno' ? 'Em análise' : 'Respondida'; } // Acrescenta uma mensagem fictícia.
+  if (path === '/api/status') { item.archived = data.status === 'Resolvida'; item.status = data.status; item.messages.push({author:'Sistema',body:'Situação alterada para ' + data.status.toLowerCase() + '.',created:Date.now()/1000}); } // Registra o andamento do exemplo.
+  if (path === '/api/archive') { if (user.role === 'aluno') throw new Error('Somente a equipe pode arquivar.'); item.archived = data.archived; item.status = data.archived ? 'Resolvida' : 'Em análise'; item.messages.push({author:'Sistema',body:data.archived ? 'Manifestação resolvida e arquivada pelo atendimento.' : 'Manifestação desarquivada para nova análise.',created:Date.now()/1000}); } // Demonstra o arquivo compartilhado da equipe.
   saveDemo(list); return {ok:true}; // Confirma a alteração local.
 }
 async function api(path, data) { // Centraliza a comunicação com o servidor real ou a prévia.
@@ -814,7 +861,7 @@ async function api(path, data) { // Centraliza a comunicação com o servidor re
   return result; // Entrega os dados autorizados.
 }
 function loggedOut() { // Restaura a apresentação pública.
-  user = null; tickets = []; activeId = null; resetLogin(); // Descarta dados privados da memória da tela.
+  user = null; tickets = []; activeId = null; archiveView = false; resetLogin(); $('sectorFilter').value = ''; $('search').value = ''; $('statusFilter').value = ''; // Descarta dados privados da memória da tela.
   $('workspace').hidden = true; $('welcome').hidden = false; $('how').hidden = false; // Mostra a entrada.
   $('account').replaceChildren(); $('ticketList').replaceChildren(); $('detailContent').replaceChildren(); // Limpa os dados exibidos.
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); // Fecha janelas privadas.
@@ -825,6 +872,7 @@ async function loggedIn() { // Monta a área do perfil autenticado.
   $('panelLabel').textContent = student ? 'ÁREA DO ALUNO' : 'GESTÃO DA OUVIDORIA'; // Nomeia a área atual.
   $('panelTitle').textContent = student ? 'Minhas manifestações' : 'Central de manifestações'; // Adapta o título ao perfil.
   $('panelDescription').textContent = student ? 'Acompanhe cada conversa, do primeiro contato à solução.' : 'Acolha os relatos, acompanhe os protocolos e responda aos alunos.'; // Explica a tarefa principal.
+  archiveView = false; $('archivedTab').hidden = student; $('sectorFilterField').hidden = student; $('sectorFilter').value = ''; $('search').value = ''; $('statusFilter').value = ''; // Limpa filtros ao trocar de perfil e mostra os controles somente à equipe.
   $('newTicket').hidden = !student; // Restringe a criação ao perfil de aluno na interface.
   $('account').innerHTML = `<strong>${escapeHTML(user.role)}</strong><span>${escapeHTML(user.email)}</span> <button class="text-button" id="logout" type="button">Sair</button>`; // Mostra os dados da própria sessão.
   $('logout').onclick = event => busy(event.currentTarget, async () => {await api('/api/logout', {}); loggedOut();}); // Invalida a sessão no servidor.
@@ -833,12 +881,19 @@ async function loggedIn() { // Monta a área do perfil autenticado.
 async function refresh() { // Atualiza os protocolos e os indicadores.
   tickets = await api('/api/tickets'); // Recebe apenas registros permitidos pelo servidor.
   $('stats').innerHTML = [['Total de manifestações',tickets.length],['Em atendimento',tickets.filter(t => ['Recebida','Em análise'].includes(t.status)).length],['Respondidas',tickets.filter(t => t.status === 'Respondida').length],['Resolvidas',tickets.filter(t => t.status === 'Resolvida').length]].map(([label,count]) => `<div class="stat"><strong>${count}</strong><span>${label}</span></div>`).join(''); // Resume os registros recebidos.
+  const selectedSector = $('sectorFilter').value; // Mantém o filtro ativo após responder ou arquivar.
+  const sectors = [...new Set([...Array.from($('sector').options, option => option.value), ...tickets.map(t => t.sector)])].sort((a,b) => a.localeCompare(b, 'pt-BR')); // Inclui as áreas do formulário e áreas antigas do banco.
+  $('sectorFilter').innerHTML = '<option value="">Todas as áreas</option>' + sectors.map(sector => `<option value="${escapeHTML(sector)}">${escapeHTML(sector)}</option>`).join(''); // Escapa os textos antes de montar as opções.
+  $('sectorFilter').value = selectedSector; // Preserva a área escolhida nas duas abas.
   renderList(); // Reaplica os filtros atuais.
 }
 function renderList() { // Exibe resultados de busca e situação.
   const search = $('search').value.trim().toLocaleLowerCase('pt-BR'); // Normaliza a consulta digitada.
-  const filtered = tickets.filter(t => (! $('statusFilter').value || t.status === $('statusFilter').value) && (t.subject + ' ' + t.id).toLocaleLowerCase('pt-BR').includes(search)); // Combina os filtros.
-  $('ticketList').innerHTML = filtered.length ? filtered.map(t => `<button type="button" class="ticket-card" data-ticket="${escapeHTML(t.id)}"><div><span class="protocol">${escapeHTML(t.id)}</span><h3>${escapeHTML(t.subject)}</h3><span class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${t.anonymous ? 'Identidade restrita ao diretor' : 'Manifestação identificada'}</span></div>${badge(t.status)}</button>`).join('') : '<div class="empty"><h3>Nenhuma manifestação por aqui.</h3><p>Crie uma nova manifestação ou ajuste os filtros.</p></div>'; // Exibe cartões ou um estado vazio.
+  const staff = user?.role !== 'aluno'; // O aluno continua consultando todos os próprios protocolos, inclusive resolvidos.
+  $('allTab').classList.toggle('active', !archiveView); $('archivedTab').classList.toggle('active', archiveView); // Destaca a aba atual.
+  $('allTab').setAttribute('aria-pressed', String(!archiveView)); $('archivedTab').setAttribute('aria-pressed', String(archiveView)); // Anuncia a escolha a leitores de tela.
+  const filtered = tickets.filter(t => (!staff || Boolean(t.archived) === archiveView) && (!staff || !$('sectorFilter').value || t.sector === $('sectorFilter').value) && (!$('statusFilter').value || t.status === $('statusFilter').value) && (t.subject + ' ' + t.id).toLocaleLowerCase('pt-BR').includes(search)); // Combina aba, área, situação e busca sem alterar permissões de acesso.
+  $('ticketList').innerHTML = filtered.length ? filtered.map(t => `<button type="button" class="ticket-card" data-ticket="${escapeHTML(t.id)}"><div><span class="protocol">${escapeHTML(t.id)}</span><h3>${escapeHTML(t.subject)}</h3><span class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${t.anonymous ? 'Identidade restrita ao diretor' : 'Manifestação identificada'}</span></div>${badge(t.status)}${t.archived ? '<span class="badge">Arquivada</span>' : ''}</button>`).join('') : `<div class="empty"><h3>${archiveView ? 'Nenhuma manifestação arquivada nesta busca.' : 'Nenhuma manifestação por aqui.'}</h3><p>Ajuste os filtros${staff ? ' ou consulte a outra aba' : ' ou crie uma nova manifestação'}.</p></div>`; // Exibe cartões ou um estado vazio.
 }
 function showDetail(id) { // Abre o histórico do protocolo selecionado.
   activeId = id; // Guarda o alvo das próximas ações.
@@ -846,19 +901,21 @@ function showDetail(id) { // Abre o histórico do protocolo selecionado.
   if (!t) return; // Evita abrir um protocolo ausente.
   $('detailProtocol').textContent = t.id; $('detailSubject').textContent = t.subject; // Usa texto simples para protocolo e título.
   const identity = t.anonymous ? 'Identidade restrita ao diretor' : `Identificado: ${t.identity || ''}`; // Não tenta deduzir o autor anônimo.
-  $('detailContent').innerHTML = `${badge(t.status)}<p class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${escapeHTML(identity)}</p><p class="detail-body">${escapeHTML(t.body)}</p><h3>Histórico de atendimento</h3>${t.messages.length ? t.messages.map(m => `<div class="message ${m.author === 'Ouvidoria Campo Real' ? 'staff' : ''}"><strong>${escapeHTML(m.author)}</strong><span class="meta"> · ${date(m.created)}</span><p>${escapeHTML(m.body)}</p></div>`).join('') : '<p class="form-note">Aguardando atendimento. As respostas aparecerão aqui.</p>'}`; // Exibe relatos como texto escapado.
+  $('detailContent').innerHTML = `${badge(t.status)}${t.archived ? ' <span class="badge">Arquivada</span>' : ''}<p class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${escapeHTML(identity)}</p><p class="detail-body">${escapeHTML(t.body)}</p><h3>Histórico de atendimento</h3>${t.messages.length ? t.messages.map(m => `<div class="message ${m.author === 'Ouvidoria Campo Real' ? 'staff' : ''}"><strong>${escapeHTML(m.author)}</strong><span class="meta"> · ${date(m.created)}</span><p>${escapeHTML(m.body)}</p></div>`).join('') : '<p class="form-note">Aguardando atendimento. As respostas aparecerão aqui.</p>'}`; // Exibe relatos como texto escapado.
   $('detailActions').replaceChildren(); // Limpa ações e identidades reveladas em aberturas anteriores.
   if (user.role === 'aluno') { // Mostra as ações de confirmação do aluno.
     action(t.status === 'Resolvida' ? 'Pedir nova análise' : '✓ Foi resolvido', () => updateStatus(t.status === 'Resolvida' ? 'Em análise' : 'Resolvida')); // Permite encerrar ou reabrir o atendimento.
     if (t.status === 'Respondida') action('Ainda não foi resolvido', () => updateStatus('Em análise')); // Permite contestar a solução proposta.
   } else { // Mostra as ações de atendimento.
-    action('Marcar em análise', () => updateStatus('Em análise')); // Atualiza o andamento institucional.
+    if (t.archived) action('Desarquivar e retomar atendimento', () => updateArchive(false)); // Retoma sem perder nenhuma mensagem.
+    else { action('Marcar em análise', () => updateStatus('Em análise')); action('Resolver e arquivar', () => updateArchive(true)); } // A conclusão pela equipe arquiva automaticamente. // Atualiza o andamento institucional.
     if (user.role === 'diretor' && t.anonymous) action('Consultar autoria restrita', async () => { // Exige consulta explícita do diretor.
       const result = await api('/api/identity', {id:activeId}); // O servidor autoriza e registra a consulta.
       const note = document.createElement('p'); note.className = 'form-note'; note.textContent = `Autoria: ${result.email}. Consulta registrada${DEMO ? ' apenas ilustrativa na demonstração' : ' na auditoria do servidor'}.`; // Mostra a identidade sem inserir HTML.
       $('detailActions').append(note); // Mantém a informação dentro da janela atual.
     });
   }
+  $('replyForm').hidden = user.role !== 'aluno' && Boolean(t.archived); // A equipe retoma antes de enviar outra resposta; o aluno ainda pode complementar.
   $('replyForm').reset(); // Remove rascunhos de outros protocolos.
   if (!$('detailDialog').open) $('detailDialog').showModal(); // Usa uma janela com foco controlado pelo navegador.
 }
@@ -868,6 +925,10 @@ function action(label, handler) { // Cria um botão de ação sem eventos HTML e
 }
 async function updateStatus(status) { // Solicita a alteração autorizada de situação.
   await api('/api/status', {id:activeId,status}); await refresh(); showDetail(activeId); notify('Situação atualizada.'); // Recarrega o estado confirmado pelo servidor.
+}
+async function updateArchive(archived) { // Resolve e arquiva ou retoma uma manifestação na fila compartilhada da equipe.
+  await api('/api/archive', {id:activeId,archived}); await refresh(); $('detailDialog').close(); // A mudança só aparece depois da confirmação do servidor.
+  notify(archived ? 'Manifestação resolvida e movida para Arquivadas.' : 'Manifestação desarquivada e devolvida ao atendimento.'); // Indica em qual aba encontrar o protocolo.
 }
 function setRegisterMode(enabled) { // Alterna entre entrar e criar conta, sem segunda etapa por e-mail.
   registerMode = enabled; $('confirmField').hidden = !enabled; $('confirmPassword').required = enabled; // Solicita confirmação somente no cadastro.
@@ -905,8 +966,9 @@ $('replyForm').onsubmit = event => { // Envia uma resposta ou complemento.
   busy(event.submitter, async () => { await api('/api/reply', {id:activeId,body:$('replyBody').value.trim()}); await refresh(); showDetail(activeId); notify('Mensagem enviada.'); }); // Atualiza o histórico após confirmação.
 };
 $('ticketList').onclick = event => { const card = event.target.closest('[data-ticket]'); if (card) showDetail(card.dataset.ticket); }; // Abre o cartão clicado.
-$('search').oninput = renderList; $('statusFilter').onchange = renderList; // Reaplica filtros ao editar os controles.
-$('allTab').onclick = () => { $('search').value = ''; $('statusFilter').value = ''; renderList(); }; // Restaura todos os protocolos.
+$('search').oninput = renderList; $('statusFilter').onchange = renderList; $('sectorFilter').onchange = renderList; // Reaplica filtros ao editar os controles.
+$('allTab').onclick = () => { archiveView = false; renderList(); }; // Volta à lista principal preservando os filtros.
+$('archivedTab').onclick = () => { if (user?.role === 'aluno') return; archiveView = true; renderList(); }; // Permite consultar o arquivo somente na interface da equipe.
 document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => $(button.dataset.close).close()); // Liga os botões de fechar às janelas.
 if (DEMO) { // Configura somente o arquivo de demonstração.
   $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; $('password').required = false; // Identifica claramente a simulação.
@@ -998,9 +1060,21 @@ O `.env` antigo pode continuar na pasta, mas as opções SMTP não são usadas. 
 - **Supervisor:** atende e responde à fila, sem receber a autoria dos relatos anônimos.
 - **Diretor:** atende como a equipe e pode consultar explicitamente a autoria anônima. Cada consulta fica registrada na tabela `audit`.
 
-As situações são **Recebida**, **Em análise**, **Respondida** e **Resolvida**. O aluno confirma a solução; a equipe não encerra por ele. Respostas e mudanças de situação ficam no histórico. O aluno acompanha pelo painel, sem notificações automáticas por e-mail.
+As situações são **Recebida**, **Em análise**, **Respondida** e **Resolvida**. O aluno pode confirmar a solução, e a equipe também pode concluir pelo botão **Resolver e arquivar**. O aluno mantém a opção de pedir nova análise. Respostas e mudanças de situação ficam no histórico. O aluno acompanha pelo painel, sem notificações automáticas por e-mail.
 
 **Anonimato significa identidade oculta para o atendimento, com consulta pelo diretor na aplicação.** O cadastro e o login continuam obrigatórios. Se a pessoa escrever nome ou e-mail no relato, esse texto ficará visível. Quem administra o computador ou o banco também pode acessar os arquivos; restrinja o acesso à infraestrutura.
+
+## Filtro por área e manifestações arquivadas
+
+Supervisor e diretor têm um seletor **Todas as áreas**, no qual podem escolher Infraestrutura, Financeiro, Secretaria e as demais áreas do formulário. O filtro combina com a busca por assunto/protocolo e com a situação, tanto na lista principal quanto na aba **Arquivadas**. Trocar de aba mantém os filtros escolhidos. É um filtro de consulta da fila autorizada, não uma restrição de acesso por departamento.
+
+Na aba **Todas as manifestações**, a equipe vê os protocolos que ainda não foram arquivados. Para concluir um atendimento, abra o protocolo e clique em **Resolver e arquivar**. Essa ação muda a situação para **Resolvida**, tira o registro da lista principal e o coloca em **Arquivadas**. A confirmação de solução pelo aluno também arquiva o protocolo para a equipe.
+
+Na aba **Arquivadas**, supervisor e diretor podem consultar o histórico e usar **Desarquivar e retomar atendimento**. A situação volta para **Em análise** e o registro reaparece na lista principal. A equipe precisa retomar o atendimento antes de enviar outra resposta pela interface. O aluno continua vendo os próprios protocolos, inclusive os arquivados; se pedir nova análise ou escrever outra mensagem, o protocolo volta ao atendimento automaticamente.
+
+Arquivar não exclui dados e não altera a proteção da autoria anônima. A autoria permanece indisponível para o supervisor; o diretor precisa usar a consulta restrita. Ações de resolver/arquivar e desarquivar pelo atendimento ficam no histórico e na auditoria, com conta responsável e data.
+
+A tabela `tickets` recebeu o campo `archived`, inteiro restrito a 0 ou 1. A migração acrescenta esse campo aos bancos existentes sem apagar relatos ou respostas, e coloca os protocolos anteriormente resolvidos no arquivo. A situação e a marca de arquivamento são atualizadas na mesma transação. Faça backup com o serviço parado antes de substituir o programa, mantenha a pasta `data` e reinicie. Não é necessário cadastrar novamente as contas da versão que já usava senha.
 
 ## Demonstração sem contas reais
 
@@ -1034,7 +1108,7 @@ As marcas são reproduções vetoriais de referência das imagens fornecidas, n�
 python -m unittest discover -s tests -v
 ```
 
-Os testes usam banco temporário e verificam cadastro/login sem SMTP, domínio institucional, senha incorreta, bloqueio de tentativas, hashes, perfis, diretor único, recuperação local, migração, isolamento dos protocolos, autoria restrita, auditoria, respostas, solução/reabertura, CSRF e logout. As telas precisam de conferência visual em computador e celular antes da publicação.
+Os testes usam banco temporário e verificam cadastro/login sem SMTP, domínio institucional, senha incorreta, bloqueio de tentativas, hashes, perfis, diretor único, recuperação local, migração, isolamento dos protocolos, autoria restrita, auditoria, respostas, solução/reabertura, CSRF, logout, migração de arquivamento, conclusão pela equipe, histórico arquivado e retomada pelo aluno. Os filtros de área, aba, busca e situação também foram verificados em conjunto. As telas precisam de conferência visual em computador e celular antes da publicação.
 ''',
 }
 
@@ -1081,7 +1155,7 @@ def initialize():
         CREATE UNIQUE INDEX IF NOT EXISTS one_director ON accounts(role) WHERE role='diretor';
         CREATE TABLE IF NOT EXISTS auth_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires REAL NOT NULL, csrf TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS tickets(id TEXT PRIMARY KEY, email TEXT NOT NULL, anonymous INTEGER NOT NULL, kind TEXT NOT NULL, subject TEXT NOT NULL, sector TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS tickets(id TEXT PRIMARY KEY, email TEXT NOT NULL, anonymous INTEGER NOT NULL, kind TEXT NOT NULL, subject TEXT NOT NULL, sector TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)));
         CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, ticket TEXT NOT NULL REFERENCES tickets(id), author TEXT NOT NULL, body TEXT NOT NULL, created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, ticket TEXT NOT NULL, created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY, hits INTEGER NOT NULL, reset REAL NOT NULL);
@@ -1091,6 +1165,12 @@ def initialize():
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codes'").fetchone():
                 db.execute('DELETE FROM codes')  # Invalida códigos de e-mail antigos sem remover relatos ou auditorias.
             db.execute("INSERT INTO auth_meta VALUES ('password_auth_v1','1')")  # Evita repetir a migração a cada reinício.
+        columns = {row['name'] for row in db.execute('PRAGMA table_info(tickets)')}  # Detecta bancos criados antes da aba de arquivo.
+        if 'archived' not in columns:
+            db.execute('ALTER TABLE tickets ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1))')  # Acrescenta o campo sem apagar relatos, mensagens ou autoria.
+        if not db.execute("SELECT 1 FROM auth_meta WHERE key='archive_v1'").fetchone():
+            db.execute("UPDATE tickets SET archived=1 WHERE status='Resolvida'")  # Coloca solicitações já resolvidas no arquivo da equipe.
+            db.execute("INSERT INTO auth_meta VALUES ('archive_v1','1')")  # Executa essa organização somente uma vez.
     os.chmod(DB, 0o600)  # Restringe a leitura do arquivo de banco.
 
 
@@ -1320,12 +1400,26 @@ class Handler(BaseHTTPRequestHandler):
                     if kind not in TYPES or type(data.get('anonymous')) is not bool:
                         raise Error(400, 'Tipo ou identificação inválidos.')
                     ticket_id = 'CR-' + time.strftime('%Y') + '-' + secrets.token_hex(4).upper()  # Cria protocolo não sequencial.
-                    db.execute('INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)', (ticket_id, email, int(data['anonymous']), kind, subject, sector, body, 'Recebida', now))  # Associa a autoria somente no servidor.
+                    db.execute('INSERT INTO tickets(id,email,anonymous,kind,subject,sector,body,status,created) VALUES (?,?,?,?,?,?,?,?,?)', (ticket_id, email, int(data['anonymous']), kind, subject, sector, body, 'Recebida', now))  # Associa a autoria somente no servidor.
                     return self.success(db, 201, {'id': ticket_id})  # Informa o protocolo gerado.
                 ticket_id = self.text(data, 'id', 1, 40)  # Identifica o protocolo solicitado.
                 ticket = db.execute('SELECT * FROM tickets WHERE id=?', (ticket_id,)).fetchone()  # Busca a manifestação.
                 if not ticket or (profile == 'aluno' and ticket['email'] != email):
                     raise Error(404, 'Manifestação não encontrada.')  # Não revela existência de registros alheios.
+                if path == '/api/archive':
+                    if profile not in ('supervisor', 'diretor'):
+                        raise Error(403, 'Somente supervisor e diretor podem resolver e arquivar pelo atendimento.')  # O aluno não controla o arquivo da equipe por esta rota.
+                    archived = data.get('archived')  # Lê uma escolha booleana, sem aceitar textos como verdadeiro.
+                    if type(archived) is not bool:
+                        raise Error(400, 'Informe se deseja arquivar ou desarquivar.')
+                    if bool(ticket['archived']) == archived:
+                        return self.success(db, 200, {'ok': True})  # Repetir o mesmo pedido não duplica o histórico.
+                    status = 'Resolvida' if archived else 'Em análise'  # Toda conclusão pelo atendimento arquiva; toda retomada volta à fila.
+                    db.execute('UPDATE tickets SET archived=?,status=? WHERE id=?', (int(archived), status, ticket_id))  # Grava situação e arquivo na mesma transação.
+                    message = 'Manifestação resolvida e arquivada pelo atendimento.' if archived else 'Manifestação desarquivada e devolvida para análise pelo atendimento.'
+                    db.execute('INSERT INTO messages(ticket,author,body,created) VALUES (?,?,?,?)', (ticket_id, 'Sistema', message, now))  # O aluno vê o andamento sem dados internos da equipe.
+                    db.execute('INSERT INTO audit(actor,action,ticket,created) VALUES (?,?,?,?)', (email, 'Resolver e arquivar' if archived else 'Desarquivar', ticket_id, now))  # Registra qual conta realizou a ação.
+                    return self.success(db, 200, {'ok': True})
                 if path == '/api/identity':
                     if profile != 'diretor':
                         raise Error(403, 'Somente o diretor pode consultar a autoria restrita.')
@@ -1334,17 +1428,19 @@ class Handler(BaseHTTPRequestHandler):
                 if path == '/api/reply':
                     body = self.text(data, 'body', 3, 5000)  # Valida o texto da resposta.
                     db.execute('INSERT INTO messages(ticket,author,body,created) VALUES (?,?,?,?)', (ticket_id, 'Aluno' if profile == 'aluno' else 'Ouvidoria Campo Real', body, now))  # Preserva o anonimato do autor nas mensagens.
+                    if ticket['archived']:
+                        db.execute('INSERT INTO messages(ticket,author,body,created) VALUES (?,?,?,?)', (ticket_id, 'Sistema', 'Manifestação desarquivada após nova mensagem.', now))  # Evita deixar uma nova solicitação escondida no arquivo.
                     if profile != 'aluno':
-                        db.execute('UPDATE tickets SET status=? WHERE id=?', ('Respondida', ticket_id))  # Sinaliza a nova resposta institucional.
+                        db.execute('UPDATE tickets SET status=?,archived=0 WHERE id=?', ('Respondida', ticket_id))  # Sinaliza a nova resposta institucional.
                     elif ticket['status'] in ('Respondida', 'Resolvida'):
-                        db.execute('UPDATE tickets SET status=? WHERE id=?', ('Em análise', ticket_id))  # Reabre a análise quando o aluno volta a se manifestar.
+                        db.execute('UPDATE tickets SET status=?,archived=0 WHERE id=?', ('Em análise', ticket_id))  # Reabre a análise quando o aluno volta a se manifestar.
                     return self.success(db, 200, {'ok': True})
                 if path == '/api/status':
                     status = self.text(data, 'status', 1, 30)  # Lê a nova situação.
-                    allowed = {'Resolvida', 'Em análise'} if profile == 'aluno' else {'Em análise', 'Respondida'}  # O aluno confirma a solução; equipe não encerra por ele.
+                    allowed = {'Resolvida', 'Em análise'} if profile == 'aluno' else {'Em análise', 'Respondida'}  # A equipe conclui pelo botão específico de resolver e arquivar.
                     if status not in allowed or (status == 'Respondida' and not db.execute("SELECT 1 FROM messages WHERE ticket=? AND author='Ouvidoria Campo Real'", (ticket_id,)).fetchone()):
                         raise Error(400, 'Alteração de situação não permitida.')
-                    db.execute('UPDATE tickets SET status=? WHERE id=?', (status, ticket_id))  # Atualiza o andamento.
+                    db.execute('UPDATE tickets SET status=?,archived=? WHERE id=?', (status, int(status == 'Resolvida'), ticket_id))  # Atualiza o andamento.
                     db.execute('INSERT INTO messages(ticket,author,body,created) VALUES (?,?,?,?)', (ticket_id, 'Sistema', f'Situação alterada para {status.lower()} pelo ' + ('aluno.' if profile == 'aluno' else 'atendimento.'), now))  # Mantém o histórico.
                     return self.success(db, 200, {'ok': True})
                 raise Error(404, 'Operação não encontrada.')
