@@ -50,7 +50,7 @@ class AccountTests(unittest.TestCase):
             db.execute('CREATE TABLE codes(email TEXT, hash TEXT)')  # Simula códigos legados.
             db.execute('INSERT INTO codes VALUES (?,?)', ('legado@camporeal.edu.br', 'antigo'))
             db.execute('INSERT INTO sessions VALUES (?,?,?,?)', ('antiga', 'legado@camporeal.edu.br', 9999999999, 'csrf'))
-            db.execute('INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)', ('CR-LEGADO', 'legado@camporeal.edu.br', 1, 'Reclamação', 'Relato anterior', 'Geral', 'Histórico anterior preservado.', 'Recebida', 1))
+            db.execute('INSERT INTO tickets(id,email,anonymous,kind,subject,sector,body,status,created) VALUES (?,?,?,?,?,?,?,?,?)', ('CR-LEGADO', 'legado@camporeal.edu.br', 1, 'Reclamação', 'Relato anterior', 'Geral', 'Histórico anterior preservado.', 'Recebida', 1))
         app.initialize()  # Migra a instalação sem apagar manifestações.
         with app.database() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM tickets').fetchone()[0], 1)
@@ -61,6 +61,25 @@ class AccountTests(unittest.TestCase):
         app.initialize()  # Reinícios seguintes preservam sessões válidas.
         with app.database() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0], 1)
+
+    def test_archive_migration_keeps_old_schema_data(self):
+        legacy = Path(self.temp.name) / 'old-data' / 'legacy.sqlite3'
+        legacy.parent.mkdir()
+        with sqlite3.connect(legacy) as db:
+            db.execute('CREATE TABLE tickets(id TEXT PRIMARY KEY,email TEXT NOT NULL,anonymous INTEGER NOT NULL,kind TEXT NOT NULL,subject TEXT NOT NULL,sector TEXT NOT NULL,body TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL)')  # Reproduz o esquema sem arquivamento.
+            db.execute('INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)', ('CR-ANTIGO', 'antigo@camporeal.edu.br', 1, 'Reclamação', 'Relato anterior', 'Infraestrutura', 'Este relato já estava resolvido.', 'Resolvida', 1))
+        with patch.object(app, 'DB', legacy):
+            app.initialize()  # Acrescenta a coluna sem recriar as manifestações.
+            with app.database() as db:
+                row = db.execute('SELECT * FROM tickets WHERE id=?', ('CR-ANTIGO',)).fetchone()
+                self.assertEqual(row['archived'], 1)  # Protocolos já resolvidos entram no arquivo automaticamente.
+                self.assertEqual(row['email'], 'antigo@camporeal.edu.br')
+                self.assertEqual(row['body'], 'Este relato já estava resolvido.')  # Mantém todo o conteúdo anterior.
+                self.assertEqual(db.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
+                db.execute("UPDATE tickets SET archived=0,status='Em análise' WHERE id='CR-ANTIGO'")
+            app.initialize()  # Um novo reinício não desfaz a retomada do atendimento.
+            with app.database() as db:
+                self.assertEqual(db.execute("SELECT archived FROM tickets WHERE id='CR-ANTIGO'").fetchone()[0], 0)
 
 
 if __name__ == '__main__':
