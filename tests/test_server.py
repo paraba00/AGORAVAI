@@ -117,13 +117,50 @@ class SecurityTests(unittest.TestCase):
     def test_04_legacy_email_cannot_be_claimed_publicly(self):
         email = 'historico@camporeal.edu.br'  # Representa quem usou o antigo login por código.
         with server.database() as db:
-            db.execute('INSERT INTO tickets VALUES (?,?,?,?,?,?,?,?,?)', ('CR-HISTORICO', email, 1, 'Crítica', 'Registro anterior', 'Geral', 'Este relato pertence a uma conta antiga.', 'Recebida', 1))
+            db.execute('INSERT INTO tickets(id,email,anonymous,kind,subject,sector,body,status,created) VALUES (?,?,?,?,?,?,?,?,?)', ('CR-HISTORICO', email, 1, 'Crítica', 'Registro anterior', 'Geral', 'Este relato pertence a uma conta antiga.', 'Recebida', 1))
         self.assertEqual(self.request('/api/register', {'email': email, 'password': 'SenhaTeste123!'})[0], 409)  # Um visitante não pode reivindicar esse histórico.
         with server.database() as db:
             server.insert_account(db, email, 'SenhaTeste123!', 'aluno')  # O responsável provisiona a conta preservada pelo mecanismo local.
         account = self.login(email)
         rows = self.request('/api/tickets', session=account)[1]
         self.assertEqual(rows[0]['id'], 'CR-HISTORICO')  # O histórico é recuperado sem copiar ou apagar registros.
+
+    def test_05_staff_archive_and_student_reopening(self):
+        alice = self.login('alice@camporeal.edu.br')  # Usa uma conta que já tem histórico.
+        supervisor = self.login('supervisor@camporeal.edu.br')
+        director = self.login('diretor@camporeal.edu.br')
+        payload = {'kind': 'Reclamação', 'sector': 'Infraestrutura', 'subject': 'Manutenção da iluminação', 'body': 'Precisamos de manutenção na iluminação do estacionamento.', 'anonymous': True}
+        status, created, _ = self.request('/api/tickets', payload, alice)
+        self.assertEqual(status, 201)
+        ticket_id = created['id']
+        self.assertEqual(self.request('/api/archive', {'id': ticket_id, 'archived': True}, alice)[0], 403)  # Aluno não aciona o arquivo administrativo.
+        self.assertEqual(self.request('/api/archive', {'id': ticket_id, 'archived': 'true'}, supervisor)[0], 400)  # Não aceita texto no lugar de booleano.
+        self.assertEqual(self.request('/api/archive', {'id': ticket_id, 'archived': True}, supervisor)[0], 200)  # Supervisor resolve e arquiva.
+        for account in (alice, supervisor, director):
+            record = next(t for t in self.request('/api/tickets', session=account)[1] if t['id'] == ticket_id)
+            self.assertEqual(record['status'], 'Resolvida')
+            self.assertEqual(record['archived'], 1)
+            self.assertEqual(record['sector'], 'Infraestrutura')
+            if account['role'] != 'aluno':
+                self.assertIsNone(record['identity'])  # O arquivamento não revela a autoria anônima.
+                self.assertNotIn(alice['email'], json.dumps(record))
+        self.request('/api/archive', {'id': ticket_id, 'archived': True}, supervisor)  # Repete a mesma ação.
+        with server.database() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM audit WHERE ticket=? AND action='Resolver e arquivar'", (ticket_id,)).fetchone()[0], 1)  # Não duplica o histórico.
+        self.assertEqual(self.request('/api/archive', {'id': ticket_id, 'archived': False}, director)[0], 200)  # Diretor retoma o protocolo.
+        record = next(t for t in self.request('/api/tickets', session=supervisor)[1] if t['id'] == ticket_id)
+        self.assertEqual((record['status'], record['archived']), ('Em análise', 0))
+        self.request('/api/archive', {'id': ticket_id, 'archived': True}, director)
+        self.assertEqual(self.request('/api/reply', {'id': ticket_id, 'body': 'Ainda preciso de ajuda neste ponto.'}, alice)[0], 200)
+        record = next(t for t in self.request('/api/tickets', session=supervisor)[1] if t['id'] == ticket_id)
+        self.assertEqual((record['status'], record['archived']), ('Em análise', 0))  # Nova mensagem do aluno tira o protocolo do arquivo.
+        self.assertGreaterEqual(len(record['messages']), 5)  # Preserva as ações e a conversa anteriores.
+        self.request('/api/status', {'id': ticket_id, 'status': 'Resolvida'}, alice)
+        record = next(t for t in self.request('/api/tickets', session=supervisor)[1] if t['id'] == ticket_id)
+        self.assertEqual(record['archived'], 1)  # Confirmação de solução pelo aluno também arquiva.
+        self.request('/api/status', {'id': ticket_id, 'status': 'Em análise'}, alice)
+        record = next(t for t in self.request('/api/tickets', session=supervisor)[1] if t['id'] == ticket_id)
+        self.assertEqual(record['archived'], 0)  # Pedido de nova análise devolve o protocolo à lista principal.
 
 
 if __name__ == '__main__':
