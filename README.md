@@ -67,9 +67,21 @@ O `.env` antigo pode continuar na pasta, mas as opções SMTP não são usadas. 
 - **Supervisor:** atende e responde à fila, sem receber a autoria dos relatos anônimos.
 - **Diretor:** atende como a equipe e pode consultar explicitamente a autoria anônima. Cada consulta fica registrada na tabela `audit`.
 
-As situações são **Recebida**, **Em análise**, **Respondida** e **Resolvida**. O aluno confirma a solução; a equipe não encerra por ele. Respostas e mudanças de situação ficam no histórico. O aluno acompanha pelo painel, sem notificações automáticas por e-mail.
+As situações são **Recebida**, **Em análise**, **Respondida** e **Resolvida**. O aluno pode confirmar a solução, e a equipe também pode concluir pelo botão **Resolver e arquivar**. O aluno mantém a opção de pedir nova análise. Respostas e mudanças de situação ficam no histórico. O aluno acompanha pelo painel, sem notificações automáticas por e-mail.
 
 **Anonimato significa identidade oculta para o atendimento, com consulta pelo diretor na aplicação.** O cadastro e o login continuam obrigatórios. Se a pessoa escrever nome ou e-mail no relato, esse texto ficará visível. Quem administra o computador ou o banco também pode acessar os arquivos; restrinja o acesso à infraestrutura.
+
+## Filtro por área e manifestações arquivadas
+
+Supervisor e diretor têm um seletor **Todas as áreas**, no qual podem escolher Infraestrutura, Financeiro, Secretaria e as demais áreas do formulário. O filtro combina com a busca por assunto/protocolo e com a situação, tanto na lista principal quanto na aba **Arquivadas**. Trocar de aba mantém os filtros escolhidos. É um filtro de consulta da fila autorizada, não uma restrição de acesso por departamento.
+
+Na aba **Todas as manifestações**, a equipe vê os protocolos que ainda não foram arquivados. Para concluir um atendimento, abra o protocolo e clique em **Resolver e arquivar**. Essa ação muda a situação para **Resolvida**, tira o registro da lista principal e o coloca em **Arquivadas**. A confirmação de solução pelo aluno também arquiva o protocolo para a equipe.
+
+Na aba **Arquivadas**, supervisor e diretor podem consultar o histórico e usar **Desarquivar e retomar atendimento**. A situação volta para **Em análise** e o registro reaparece na lista principal. A equipe precisa retomar o atendimento antes de enviar outra resposta pela interface. O aluno continua vendo os próprios protocolos, inclusive os arquivados; se pedir nova análise ou escrever outra mensagem, o protocolo volta ao atendimento automaticamente.
+
+Arquivar não exclui dados e não altera a proteção da autoria anônima. A autoria permanece indisponível para o supervisor; o diretor precisa usar a consulta restrita. Ações de resolver/arquivar e desarquivar pelo atendimento ficam no histórico e na auditoria, com conta responsável e data.
+
+A tabela `tickets` recebeu o campo `archived`, inteiro restrito a 0 ou 1. A migração acrescenta esse campo aos bancos existentes sem apagar relatos ou respostas, e coloca os protocolos anteriormente resolvidos no arquivo. A situação e a marca de arquivamento são atualizadas na mesma transação. Faça backup com o serviço parado antes de substituir o programa, mantenha a pasta `data` e reinicie. Não é necessário cadastrar novamente as contas da versão que já usava senha.
 
 ## Demonstração sem contas reais
 
@@ -103,4 +115,4 @@ As marcas são reproduções vetoriais de referência das imagens fornecidas, n�
 python -m unittest discover -s tests -v
 ```
 
-Os testes usam banco temporário e verificam cadastro/login sem SMTP, domínio institucional, senha incorreta, bloqueio de tentativas, hashes, perfis, diretor único, recuperação local, migração, isolamento dos protocolos, autoria restrita, auditoria, respostas, solução/reabertura, CSRF e logout. As telas precisam de conferência visual em computador e celular antes da publicação.
+Os testes usam banco temporário e verificam cadastro/login sem SMTP, domínio institucional, senha incorreta, bloqueio de tentativas, hashes, perfis, diretor único, recuperação local, migração, isolamento dos protocolos, autoria restrita, auditoria, respostas, solução/reabertura, CSRF, logout, migração de arquivamento, conclusão pela equipe, histórico arquivado e retomada pelo aluno. Os filtros de área, aba, busca e situação também foram verificados em conjunto. As telas precisam de conferência visual em computador e celular antes da publicação.
