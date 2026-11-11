@@ -1,460 +1,1761 @@
-<!doctype html> <!-- Usa o padrão HTML atual. -->
-<html lang="pt-BR"> <!-- Informa o idioma para leitores de tela. -->
-<head> <!-- Reúne as configurações da página. -->
-<meta charset="utf-8"> <!-- Permite acentos em português. -->
-<meta name="viewport" content="width=device-width, initial-scale=1"> <!-- Adapta a página ao celular. -->
-<title>Ouvidoria | Campo Real</title> <!-- Define o nome da aba. -->
-<meta name="description" content="Ouvidoria Campo Real: manifeste-se e acompanhe seu atendimento."> <!-- Descreve o site. -->
-<style>
-/* Define a identidade visual: azul principal, branco e amarelo nos detalhes. */
-:root { --blue:#004c70; --navy:#06344d; --yellow:#ffdd00; --ink:#17394b; --muted:#637683; --line:#dce5ea; --paper:#f5f8fa; --radius:14px; font-family:Arial,Helvetica,sans-serif; color:var(--ink); background:var(--paper); }
-/* Inclui bordas no cálculo de tamanho para evitar transbordamento. */
-* { box-sizing:border-box; }
-/* Remove margens padrão e melhora a leitura. */
-body { margin:0; line-height:1.5; }
-/* Garante que os elementos ocultos não apareçam por outras regras. */
-[hidden] { display:none!important; }
-/* Mantém a tipografia dos controles consistente. */
-button,input,textarea,select { font:inherit; }
-/* Torna os botões reconhecíveis e confortáveis ao toque. */
-button { cursor:pointer; min-height:44px; }
-/* Exibe um foco visível para navegação por teclado. */
-:focus-visible { outline:3px solid #b08d00; outline-offset:3px; }
-/* Bloqueia cliques repetidos durante solicitações. */
-button:disabled { opacity:.6; cursor:wait; }
-/* Destaca que o arquivo aberto localmente é só uma demonstração. */
-.demo-banner { padding:9px 20px; text-align:center; background:#fff4bc; color:#665100; font-size:12px; font-weight:700; }
-/* Organiza o cabeçalho institucional. */
-.header { min-height:116px; padding:15px 6%; background:white; display:flex; align-items:center; gap:30px; border-bottom:1px solid var(--line); }
-/* Mantém a proporção da marca. */
-.brand img { display:block; width:205px; height:86px; object-fit:contain; }
-/* Separa o nome do serviço da marca. */
-.header-label { border-left:1px solid var(--line); padding-left:28px; }
-/* Destaca o nome Ouvidoria. */
-.header-label strong { display:block; font-size:24px; letter-spacing:-.5px; }
-/* Padroniza as pequenas chamadas em letras maiúsculas. */
-.eyebrow,.step-label { font-size:10px; font-weight:700; letter-spacing:1.8px; }
-/* Alinha os dados da sessão à direita. */
-.account { margin-left:auto; text-align:right; font-size:12px; overflow-wrap:anywhere; }
-/* Identifica o perfil conectado. */
-.account strong { display:block; color:var(--blue); text-transform:capitalize; }
-/* Cria o bloco de apresentação e acesso. */
-.welcome { max-width:1320px; margin:46px auto 0; display:grid; grid-template-columns:1.14fr 1fr; padding:0 48px; }
-/* Usa o azul como área principal da composição. */
-.intro { padding:56px 48px 36px; color:white; background:var(--blue); border-radius:18px 0 0 18px; position:relative; overflow:hidden; }
-/* Insere um detalhe gráfico discreto no fundo. */
-.intro:after { content:'✦'; position:absolute; right:-56px; bottom:-170px; font-size:440px; color:#ffffff08; pointer-events:none; }
-/* Clareia a chamada sobre o fundo azul. */
-.light { color:#bed6e1; }
-/* Define os títulos principais. */
-h1 { font-size:48px; line-height:1.12; letter-spacing:-1.8px; margin:24px 0; }
-/* Aplica amarelo apenas ao detalhe do título. */
-h1 span { color:var(--yellow); }
-/* Ajusta o texto de apresentação. */
-.intro>p { color:#d6e7ee; max-width:350px; font-size:16px; line-height:1.7; }
-/* Organiza os benefícios de forma compacta. */
-.intro-points { display:flex; flex-direction:column; gap:9px; margin:26px 0 40px; font-size:12px; color:#e8f1f5; }
-/* Finaliza a apresentação com uma assinatura visual. */
-.intro-bottom { display:flex; align-items:center; gap:16px; border-top:1px solid #ffffff28; padding-top:22px; position:relative; z-index:1; }
-/* Exibe uma pequena estrela amarela. */
-.small-star { color:var(--yellow); font-size:37px; }
-/* Ajusta a assinatura institucional. */
-.intro-bottom p { font-size:11px; color:#c6dce6; margin:0; line-height:1.8; }
-/* Constrói o cartão de autenticação. */
-.login-card { background:white; border:1px solid var(--line); border-left:0; border-radius:0 18px 18px 0; padding:48px 44px 36px; }
-/* Aplica cor aos subtítulos pequenos. */
-.step-label { color:var(--blue); }
-/* Padroniza títulos secundários. */
-h2 { font-size:28px; line-height:1.2; letter-spacing:-.8px; margin:14px 0; }
-/* Suaviza os textos auxiliares. */
-.login-card>p,.workspace-heading p,.how p { color:var(--muted); font-size:13px; }
-/* Separa o formulário da introdução. */
-#loginForm { margin-top:28px; }
-/* Mantém os rótulos sempre visíveis. */
-label { display:block; font-size:12px; font-weight:700; margin:15px 0 7px; }
-/* Padroniza os campos do formulário. */
-input:not([type=checkbox]),select,textarea { width:100%; border:1px solid #cddae2; border-radius:8px; padding:12px 13px; background:white; color:var(--ink); font-size:13px; min-height:45px; }
-/* Permite aumentar a área de relato verticalmente. */
-textarea { resize:vertical; }
-/* Define a aparência compartilhada dos botões. */
-.button { border:1px solid var(--line); border-radius:8px; padding:12px 19px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; gap:15px; background:white; color:var(--blue); }
-/* Destaca as ações principais em azul. */
-.primary { background:var(--blue); border-color:var(--blue); color:white; }
-/* Aumenta a percepção de interação ao passar o mouse. */
-.primary:hover { background:var(--navy); }
-/* Expande o botão de acesso dentro do cartão. */
-#loginButton { width:100%; margin-top:18px; justify-content:space-between; }
-/* Estiliza ações secundárias como texto. */
-.text-button { border:0; background:none; padding:4px; color:var(--blue); font-size:12px; text-decoration:underline; }
-/* Explica o anonimato em um quadro discreto. */
-.privacy-note { border-top:1px solid var(--line); margin-top:28px; padding-top:20px; display:flex; align-items:flex-start; gap:12px; }
-/* Dá destaque ao ícone de privacidade. */
-.privacy-note>span { color:#a88b00; font-size:24px; }
-/* Mantém o aviso de privacidade legível. */
-.privacy-note p { margin:0; font-size:11px; line-height:1.7; color:var(--muted); }
-/* Destaca a escolha de identificação. */
-.privacy-note strong { color:var(--ink); }
-/* Organiza os perfis do demonstrador. */
-.demo-accounts { border:1px dashed #c5ad3e; border-radius:8px; padding:10px; margin-top:18px; }
-/* Reduz o texto auxiliar do demonstrador. */
-.demo-accounts p { font-size:11px; margin:0 0 5px; }
-/* Mantém os botões de demonstração compactos. */
-.demo-accounts button { border:0; background:#eef4f7; border-radius:5px; color:var(--blue); padding:6px 10px; margin:2px; font-size:11px; }
-/* Explica o fluxo em quatro colunas. */
-.how { max-width:1224px; margin:42px auto 40px; padding:0 48px; display:grid; grid-template-columns:1.1fr 1fr 1fr 1fr; gap:30px; }
-/* Mantém o título explicativo compacto. */
-.how h2 { font-size:23px; margin-top:10px; }
-/* Separa as etapas com linhas verticais. */
-.how-step { border-left:1px solid var(--line); padding-left:24px; }
-/* Numera as etapas com o azul da marca. */
-.how-step>span { color:var(--blue); font-weight:700; font-size:12px; border-bottom:3px solid var(--yellow); padding-bottom:4px; }
-/* Ajusta o título de cada etapa. */
-h3 { font-size:13px; margin:18px 0 6px; }
-/* Usa um tamanho confortável nas descrições. */
-.how-step p { margin:0; font-size:11px; }
-/* Alinha as informações do rodapé. */
-footer { border-top:1px solid var(--line); display:flex; justify-content:space-between; padding:18px 6%; color:#c6dce6; font-size:11px; background:var(--navy); align-items:center; }
-/* Aplica amarelo à separação no rodapé. */
-footer span { color:#c4a300; margin:0 7px; }
-/* Centraliza a área autenticada. */
-.workspace { max-width:1200px; margin:42px auto; padding:0 32px; min-height:55vh; }
-/* Distribui o título e a ação de criar protocolo. */
-.workspace-heading { display:flex; justify-content:space-between; align-items:center; gap:20px; }
-/* Ajusta o título do painel. */
-.workspace h1 { font-size:34px; margin:10px 0; letter-spacing:-1px; }
-/* Distribui os indicadores de acompanhamento. */
-.stats { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin:28px 0; }
-/* Cria cartões discretos para os indicadores. */
-.stat { background:white; border:1px solid var(--line); border-radius:10px; padding:18px 22px; }
-/* Destaca os números dos indicadores. */
-.stat strong { display:block; font-size:29px; line-height:1.2; color:var(--blue); }
-/* Descreve cada indicador. */
-.stat span { color:var(--muted); font-size:12px; }
-/* Reúne filtros e abas. */
-.toolbar { display:flex; justify-content:space-between; align-items:center; gap:15px; border-bottom:1px solid var(--line); padding-bottom:14px; }
-/* Identifica a aba atual com detalhe amarelo. */
-.tab { border:0; background:none; color:var(--blue); border-bottom:3px solid var(--yellow); font-weight:700; font-size:12px; }
-/* Coloca os filtros lado a lado. */
-.filters { display:flex; gap:10px; }
-/* Limita a largura dos filtros em telas grandes. */
-.filters input { max-width:230px; }
-/* Cria espaçamento entre os protocolos. */
-.ticket-list { display:grid; gap:12px; margin-top:20px; }
-/* Torna cada protocolo um botão com texto alinhado. */
-.ticket-card { display:flex; align-items:center; justify-content:space-between; gap:20px; text-align:left; background:white; border:1px solid var(--line); border-radius:10px; padding:22px; width:100%; color:var(--ink); }
-/* Evidencia o cartão interativo. */
-.ticket-card:hover { border-color:#5d94ad; box-shadow:0 3px 12px #004c7009; }
-/* Ajusta o título de cada manifestação. */
-.ticket-card h3 { margin:7px 0; font-size:16px; overflow-wrap:anywhere; }
-/* Exibe os metadados em tamanho menor. */
-.meta { color:var(--muted); font-size:11px; }
-/* Destaca os protocolos com a cor institucional. */
-.protocol { color:var(--blue); font-size:10px; font-weight:700; letter-spacing:.5px; }
-/* Define os marcadores de situação. */
-.badge { display:inline-block; border-radius:20px; padding:5px 10px; background:#eef3f6; color:#526d7c; font-size:10px; font-weight:700; white-space:nowrap; }
-/* Diferencia os protocolos em análise. */
-.badge.analysis { background:#fff4c9; color:#826a00; }
-/* Diferencia os protocolos respondidos. */
-.badge.answered { background:#e4f0fb; color:#235b8a; }
-/* Diferencia os protocolos solucionados. */
-.badge.solved { background:#e5f3eb; color:#28734c; }
-/* Apresenta estados vazios sem deixar o painel em branco. */
-.empty { text-align:center; padding:45px 20px; background:white; border:1px dashed var(--line); border-radius:10px; color:var(--muted); }
-/* Define as janelas acessíveis dos formulários. */
-dialog { border:0; border-radius:16px; padding:30px; width:min(660px,94vw); max-height:90vh; color:var(--ink); box-shadow:0 20px 90px #032c4960; }
-/* Escurece o fundo enquanto uma janela está aberta. */
-dialog::backdrop { background:#052c46a6; }
-/* Alinha o cabeçalho da janela e o botão de fechamento. */
-.dialog-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
-/* Mantém assuntos compridos dentro da janela. */
-.dialog-header h2 { overflow-wrap:anywhere; font-size:25px; }
-/* Destaca o botão de fechar sem competir com as ações. */
-.close { border:0; background:#eef3f6; border-radius:50%; width:38px; min-height:38px; flex-shrink:0; font-size:24px; color:var(--blue); }
-/* Distribui campos relacionados em duas colunas. */
-.form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-/* Explica a opção anônima junto à caixa de seleção. */
-.anonymous-option { display:flex; gap:12px; align-items:flex-start; padding:16px; border:1px solid var(--line); border-radius:8px; background:var(--paper); }
-/* Dimensiona o controle de anonimato. */
-.anonymous-option input { margin-top:3px; width:18px; height:18px; accent-color:var(--blue); flex-shrink:0; }
-/* Apresenta os limites do anonimato em texto normal. */
-.anonymous-option small { display:block; color:var(--muted); font-weight:400; margin-top:5px; font-size:11px; line-height:1.6; }
-/* Padroniza notas dos formulários. */
-.form-note { font-size:11px; color:var(--muted); }
-/* Separa a descrição original do histórico. */
-.detail-body { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--paper); border-radius:10px; padding:18px; font-size:13px; }
-/* Garante que mensagens não ultrapassem a tela. */
-.message { border-left:3px solid var(--line); padding:9px 14px; margin:15px 0; font-size:13px; overflow-wrap:anywhere; }
-/* Preserva quebras de linha nas respostas. */
-.message p { white-space:pre-wrap; margin:7px 0; }
-/* Destaca as respostas institucionais. */
-.message.staff { border-color:var(--blue); background:#f2f7fa; }
-/* Organiza as ações de acompanhamento. */
-.detail-actions { display:flex; flex-wrap:wrap; gap:8px; padding:16px 0; border-top:1px solid var(--line); margin-top:20px; }
-/* Mostra notificações com contraste e largura limitada. */
-.toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--navy); color:white; padding:15px 22px; border-radius:9px; box-shadow:0 5px 22px #0002; max-width:min(580px,92vw); font-size:13px; z-index:50; }
-/* Diferencia erros sem depender apenas de cor. */
-.toast.error { background:#873c32; }
-/* Mantém rótulos acessíveis sem ocupar espaço visual. */
-.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-/* Ajusta o layout para tablets. */
-@media(max-width:950px) { .welcome{padding:0 24px}.intro{padding:40px 28px}.login-card{padding:36px 28px}h1{font-size:39px}.how{padding:0 28px;gap:18px}.header{padding:14px 24px;gap:20px}.brand img{width:170px}.header-label{padding-left:20px}.toolbar{align-items:flex-start;flex-direction:column}.filters{width:100%}.filters input{max-width:none} }
-/* Empilha os elementos para celulares. */
-@media(max-width:650px) { .header{min-height:95px;flex-wrap:wrap;gap:12px}.brand img{width:145px;height:65px}.header-label{padding-left:15px}.header-label strong{font-size:20px}.eyebrow{font-size:9px}.account{width:100%;text-align:left;border-top:1px solid var(--line);padding-top:8px}.account strong{display:inline;margin-right:10px}.welcome{grid-template-columns:1fr;margin-top:22px;padding:0 16px}.intro{border-radius:14px 14px 0 0;padding:32px 26px}.intro h1{font-size:38px}.intro-points{margin-bottom:22px}.intro-bottom{padding-top:18px}.login-card{border-left:1px solid var(--line);border-top:0;border-radius:0 0 14px 14px;padding:30px 26px}.how{grid-template-columns:1fr;padding:0 22px;margin-top:30px}.how-step{padding:0 0 0 18px}.how-step h3{margin-top:10px}.workspace{padding:0 16px;margin-top:24px}.workspace-heading{align-items:flex-start;flex-direction:column}.workspace h1{font-size:29px}.stats{grid-template-columns:1fr 1fr;gap:10px}.stat{padding:16px}.filters{flex-direction:column}.ticket-card{padding:17px;gap:8px;align-items:flex-start}.ticket-card h3{font-size:14px}.ticket-card>.badge{font-size:9px}.form-row{grid-template-columns:1fr;gap:0}dialog{padding:22px}.detail-actions .button{flex:1}footer{padding:16px 22px;gap:12px;font-size:10px} }
-
-/* Alinha a versão branca da marca no rodapé azul. */
-.footer-brand { display:flex; align-items:center; gap:22px; }
-/* Mantém a proporção da segunda versão da marca. */
-.footer-brand img { object-fit:contain; }
-
-/* Facilita encontrar os atalhos da conta abaixo do botão principal. */
-#toggleRegister,#forgotPassword { display:block; text-align:left; margin-top:8px; }
-
-/* Permite alternar as abas e combinar três filtros em telas menores. */
-.tabs { display:flex; flex-wrap:wrap; gap:14px; }
-/* Marca somente a aba selecionada com a cor de detalhe. */
-.tab { border-bottom-color:transparent; }
-/* Mantém um indicador visível de seleção. */
-.tab.active { border-bottom-color:var(--yellow); }
-/* Evita que a área aumente a barra além da tela. */
-.filters { flex-wrap:wrap; }
-/* Mantém o seletor de área legível entre os demais filtros. */
-#sectorFilterField { min-width:170px; flex:1; }
-/* Permite que os indicadores de arquivamento se ajustem no celular. */
-.ticket-card { flex-wrap:wrap; }
-/* Evita esticar campos para fora do painel em telas pequenas. */
-@media(max-width:650px) { #sectorFilterField { width:100%; } }
-
-</style> <!-- Carrega as cores e o layout. -->
- <!-- Executa as interações depois de carregar o HTML. -->
-</head>
-<body> <!-- Inicia a parte visível. -->
-<div id="demoBanner" class="demo-banner" hidden>Demonstração local • Dados fictícios • Não envie informações pessoais.</div> <!-- Distingue a prévia do sistema real. -->
-<header class="header"> <!-- Identifica a instituição. -->
-<a class="brand" href="#inicio" aria-label="Campo Real, início"><img src="data:image/svg+xml;base64,PCEtLSBSZXByb2R1w6fDo28gdmV0b3JpYWwgZGUgcmVmZXLDqm5jaWEgYmFzZWFkYSBuYSBtYXJjYSBhbmV4YWRhOyBzdWJzdGl0dWlyIHBlbG8gYXJxdWl2byBvZmljaWFsIHBhcmEgcHVibGljYcOnw6NvLiAtLT4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgMzM1IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNlbnRybyBVbml2ZXJzaXTDoXJpbyBDYW1wbyBSZWFsLCBleGNlbMOqbmNpYSBubyBlbnNpbm8gc3VwZXJpb3IiPgo8IS0tIEVzdHJlbGEgYW1hcmVsYSBkYSBpZGVudGlkYWRlIHZpc3VhbC4gLS0+Cjxwb2x5Z29uIGZpbGw9IiNmZmRkMDAiIHBvaW50cz0iNTc1LDAgNjA2LDY2IDY3OCw3NCA2MjUsMTIzIDYzOSwxOTcgNTc1LDE2MCA1MDksMTk3IDUyMywxMjMgNDcwLDc0IDU0NCw2NiIvPgo8IS0tIE5vbWUgc3VwZXJpb3IgZSBub21lIHByaW5jaXBhbCBlbSBmb250ZSBzZXJpZmFkYS4gLS0+CjxnIGZpbGw9IiMwMDRjNzAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLFRpbWVzIE5ldyBSb21hbixzZXJpZiIgZm9udC13ZWlnaHQ9ImJvbGQiPgo8dGV4dCB4PSIzMzUiIHk9IjE0MSIgZm9udC1zaXplPSI0MCI+Q0VOVFJPPC90ZXh0Pgo8dGV4dCB4PSIzMzUiIHk9IjE4NyIgZm9udC1zaXplPSI0MCI+VU5JVkVSU0lUw4FSSU88L3RleHQ+Cjx0ZXh0IHg9IjM0MCIgeT0iMjgyIiBmb250LXNpemU9Ijk4IiB0ZXh0TGVuZ3RoPSI2NzUiIGxlbmd0aEFkanVzdD0ic3BhY2luZ0FuZEdseXBocyI+Q0FNUE8gUkVBTDwvdGV4dD4KPHRleHQgeD0iMzQwIiB5PSIzMzAiIGZvbnQtc2l6ZT0iMzciIHRleHRMZW5ndGg9IjY3NSIgbGVuZ3RoQWRqdXN0PSJzcGFjaW5nQW5kR2x5cGhzIj5FWENFTMOKTkNJQSBOTyBFTlNJTk8gU1VQRVJJT1I8L3RleHQ+CjwvZz4KPC9zdmc+" alt="Centro Universitário Campo Real" width="220" height="108"></a> <!-- Exibe a marca. -->
-<div class="header-label"><span class="eyebrow">CENTRO UNIVERSITÁRIO</span><strong>Ouvidoria</strong></div> <!-- Nomeia o serviço. -->
-<div id="account" class="account"></div> <!-- Recebe o perfil conectado e o botão de saída. -->
-</header>
-<main id="inicio"> <!-- Agrupa o conteúdo principal. -->
-<section id="welcome" class="welcome"> <!-- Apresenta o canal de escuta. -->
-<div class="intro"><span class="eyebrow light">OUVIDORIA CAMPO REAL</span><h1>Sua voz faz<br>parte da mudança<span>.</span></h1><p>Um espaço para ouvir você, acolher suas ideias e construir uma faculdade cada vez melhor.</p><div class="intro-points"><span>✓ Escuta com respeito</span><span>✓ Acompanhamento por protocolo</span></div><div class="intro-bottom"><span class="small-star" aria-hidden="true">✦</span><p>Reclamações, críticas, sugestões e elogios.<br><strong>Toda manifestação importa.</strong></p></div></div> <!-- Explica a proposta do atendimento. -->
-<div class="login-card"><span class="step-label">SEU ESPAÇO DE ESCUTA</span><h2>Vamos conversar?</h2><p>Entre com seu e-mail institucional e senha. No primeiro acesso, crie sua conta de aluno.</p>
-<form id="loginForm"> <!-- Acesso direto com e-mail e senha, sem serviço de envio. -->
-<label for="email">E-mail institucional</label><input id="email" type="email" required maxlength="254" autocomplete="username"> <!-- Mantém o campo vazio e exige endereço institucional. -->
-<label for="password">Senha</label><input id="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"> <!-- Não exibe a senha digitada. -->
-<div id="confirmField" hidden><label for="confirmPassword">Confirmar senha</label><input id="confirmPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password"></div> <!-- Confere a senha antes de cadastrar. -->
-<button id="loginButton" class="button primary" type="submit">Entrar →</button> <!-- Envia o acesso ao servidor Python. -->
-<button id="toggleRegister" type="button" class="text-button">Primeiro acesso? Criar conta de aluno</button> <!-- Permite cadastro sem escolher permissões administrativas. -->
-<button id="forgotPassword" type="button" class="text-button">Esqueci minha senha</button> <!-- Orienta recuperação pelo responsável, sem SMTP. -->
-<p id="authHint" class="form-note">Use seu e-mail @camporeal.edu.br. O cadastro verifica o domínio, mas não comprova a titularidade do e-mail.</p> <!-- Explica o limite do modelo escolhido. -->
-</form>
-<div id="demoAccounts" class="demo-accounts" hidden><p>Explore os perfis fictícios:</p><button type="button" data-demo="aluno">Aluno</button><button type="button" data-demo="supervisor">Supervisor</button><button type="button" data-demo="diretor">Diretor</button></div> <!-- Oferece perfis apenas no arquivo de demonstração. -->
-<div class="privacy-note"><span aria-hidden="true">◈</span><p><strong>Você escolhe como se identificar.</strong><br>Na opção anônima, sua identidade fica oculta para a equipe de atendimento e pode ser consultada somente pelo diretor. O login continua obrigatório.</p></div> <!-- Explica o limite do anonimato antes do acesso. -->
-</div>
-</section>
-<section id="workspace" class="workspace" hidden> <!-- Mostra o painel após o login. -->
-<div class="workspace-heading"><div><span id="panelLabel" class="eyebrow">ÁREA DO ALUNO</span><h1 id="panelTitle">Minhas manifestações</h1><p id="panelDescription">Acompanhe cada conversa, do primeiro contato à solução.</p></div><button id="newTicket" class="button primary" type="button">＋ Nova manifestação</button></div> <!-- Apresenta o painel apropriado ao perfil. -->
-<div id="stats" class="stats"></div> <!-- Resume os protocolos por situação. -->
-<div class="toolbar"><div class="tabs" role="group" aria-label="Listas de manifestações"><button id="allTab" class="tab active" type="button" aria-pressed="true">Todas as manifestações</button><button id="archivedTab" class="tab" type="button" aria-pressed="false" hidden>Arquivadas</button></div><div class="filters"><div id="sectorFilterField" hidden><label class="sr-only" for="sectorFilter">Filtrar área da manifestação</label><select id="sectorFilter"><option value="">Todas as áreas</option></select></div><label class="sr-only" for="search">Buscar manifestações</label><input id="search" type="search" placeholder="Buscar assunto ou protocolo"><label class="sr-only" for="statusFilter">Filtrar situação</label><select id="statusFilter"><option value="">Todas as situações</option><option>Recebida</option><option>Em análise</option><option>Respondida</option><option>Resolvida</option></select></div></div> <!-- Permite localizar manifestações. -->
-<div id="ticketList" class="ticket-list"></div> <!-- Recebe a lista filtrada. -->
-</section>
-<section id="how" class="how"><div><span class="eyebrow">SIMPLES, DO COMEÇO AO FIM</span><h2>Da sua voz à nossa ação.</h2></div><div class="how-step"><span>01</span><h3>Conte o que aconteceu</h3><p>Escolha o tipo de manifestação e compartilhe seu relato.</p></div><div class="how-step"><span>02</span><h3>Acompanhe a resposta</h3><p>Consulte o protocolo e converse com a ouvidoria.</p></div><div class="how-step"><span>03</span><h3>Ajude a concluir</h3><p>Informe se foi resolvido ou peça uma nova análise.</p></div></section> <!-- Explica o fluxo de atendimento. -->
-</main>
-<footer><div class="footer-brand"><img src="data:image/svg+xml;base64,PCEtLSBSZXByb2R1w6fDo28gdmV0b3JpYWwgZGUgcmVmZXLDqm5jaWEgYmFzZWFkYSBuYSBtYXJjYSBhbmV4YWRhOyBzdWJzdGl0dWlyIHBlbG8gYXJxdWl2byBvZmljaWFsIHBhcmEgcHVibGljYcOnw6NvLiAtLT4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgMzM1IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNlbnRybyBVbml2ZXJzaXTDoXJpbyBDYW1wbyBSZWFsLCBleGNlbMOqbmNpYSBubyBlbnNpbm8gc3VwZXJpb3IiPgo8IS0tIEVzdHJlbGEgYW1hcmVsYSBkYSBpZGVudGlkYWRlIHZpc3VhbC4gLS0+Cjxwb2x5Z29uIGZpbGw9IiNmZmRkMDAiIHBvaW50cz0iNTc1LDAgNjA2LDY2IDY3OCw3NCA2MjUsMTIzIDYzOSwxOTcgNTc1LDE2MCA1MDksMTk3IDUyMywxMjMgNDcwLDc0IDU0NCw2NiIvPgo8IS0tIE5vbWUgc3VwZXJpb3IgZSBub21lIHByaW5jaXBhbCBlbSBmb250ZSBzZXJpZmFkYS4gLS0+CjxnIGZpbGw9IiNmZmZmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLFRpbWVzIE5ldyBSb21hbixzZXJpZiIgZm9udC13ZWlnaHQ9ImJvbGQiPgo8dGV4dCB4PSIzMzUiIHk9IjE0MSIgZm9udC1zaXplPSI0MCI+Q0VOVFJPPC90ZXh0Pgo8dGV4dCB4PSIzMzUiIHk9IjE4NyIgZm9udC1zaXplPSI0MCI+VU5JVkVSU0lUw4FSSU88L3RleHQ+Cjx0ZXh0IHg9IjM0MCIgeT0iMjgyIiBmb250LXNpemU9Ijk4IiB0ZXh0TGVuZ3RoPSI2NzUiIGxlbmd0aEFkanVzdD0ic3BhY2luZ0FuZEdseXBocyI+Q0FNUE8gUkVBTDwvdGV4dD4KPHRleHQgeD0iMzQwIiB5PSIzMzAiIGZvbnQtc2l6ZT0iMzciIHRleHRMZW5ndGg9IjY3NSIgbGVuZ3RoQWRqdXN0PSJzcGFjaW5nQW5kR2x5cGhzIj5FWENFTMOKTkNJQSBOTyBFTlNJTk8gU1VQRVJJT1I8L3RleHQ+CjwvZz4KPC9zdmc+" alt="Campo Real" width="100" height="50"><p>Ouvidoria</p></div><p>Escutar. Acolher. Transformar.</p></footer> <!-- Fecha a página com a identidade institucional. -->
-<dialog id="composeDialog"> <!-- Contém o formulário de nova manifestação. -->
-<div class="dialog-header"><div><span class="eyebrow">ESTAMOS AQUI PARA OUVIR</span><h2>Nova manifestação</h2></div><button class="close" data-close="composeDialog" type="button" aria-label="Fechar formulário">×</button></div> <!-- Oferece título e fechamento acessível. -->
-<form id="ticketForm"><div class="form-row"><div><label for="kind">Tipo de manifestação</label><select id="kind" name="kind"><option>Reclamação</option><option>Crítica</option><option>Sugestão</option><option>Elogio</option><option>Solicitação</option></select></div><div><label for="sector">Área relacionada</label><select id="sector" name="sector"><option>Geral</option><option>Coordenação de curso</option><option>Atendimento / Secretaria</option><option>Infraestrutura</option><option>Financeiro</option><option>Ensino e aprendizagem</option><option>Outros</option></select></div></div> <!-- Classifica o relato. -->
-<label for="subject">Assunto</label><input id="subject" name="subject" minlength="5" maxlength="120" placeholder="Resuma sua manifestação" required> <!-- Resume o assunto em até 120 caracteres. -->
-<label for="body">Seu relato</label><textarea id="body" name="body" minlength="20" maxlength="5000" rows="5" placeholder="Conte o que aconteceu e como podemos ajudar. Mínimo de 20 caracteres." required></textarea> <!-- Recebe o relato completo. -->
-<label class="anonymous-option"><input id="anonymous" name="anonymous" type="checkbox"><span><strong>Enviar de forma anônima para o atendimento</strong><small>Supervisores não verão seu e-mail. Somente o diretor poderá consultar sua identidade; a consulta ficará registrada. Evite escrever seu nome no relato.</small></span></label> <!-- Solicita a escolha informada sobre a identificação. -->
-<p class="form-note">Você poderá consultar o protocolo e receber respostas mesmo na opção anônima.</p><button class="button primary" type="submit">Enviar manifestação →</button> <!-- Registra a manifestação. -->
-</form>
-</dialog>
-<dialog id="detailDialog"> <!-- Exibe o protocolo e sua conversa. -->
-<div class="dialog-header"><div><span id="detailProtocol" class="eyebrow"></span><h2 id="detailSubject"></h2></div><button class="close" data-close="detailDialog" type="button" aria-label="Fechar manifestação">×</button></div> <!-- Mostra a identificação do protocolo. -->
-<div id="detailContent"></div><div id="detailActions" class="detail-actions"></div> <!-- Recebe dados, respostas e controles autorizados. -->
-<form id="replyForm"><label for="replyBody">Escrever uma mensagem</label><textarea id="replyBody" rows="3" minlength="3" maxlength="5000" required placeholder="Continue a conversa por aqui..."></textarea><button class="button primary" type="submit">Enviar mensagem →</button></form> <!-- Permite responder e complementar. -->
-</dialog>
-<div id="toast" class="toast" role="status" aria-live="polite" hidden></div> <!-- Anuncia sucessos e erros sem usar alertas invasivos. -->
-<script>
-'use strict'; // Evita variáveis criadas por engano.
-const $ = id => document.getElementById(id); // Facilita localizar elementos pelo identificador.
-const DEMO = location.protocol === 'file:'; // Ativa o demonstrador somente quando o arquivo é aberto diretamente.
-const statuses = ['Recebida', 'Em análise', 'Respondida', 'Resolvida']; // Define a ordem das situações.
-const demoEmails = {aluno:'aluno.exemplo@camporeal.edu.br',supervisor:'supervisor.exemplo@camporeal.edu.br',diretor:'diretor.exemplo@camporeal.edu.br'}; // Contas fictícias, sem validade no servidor.
-let user = null, tickets = [], activeId = null, registerMode = false, archiveView = false, toastTimer; // Guarda o estado da tela, sem armazenar a sessão real.
-const escapeHTML = text => String(text ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x])); // Impede que relatos sejam interpretados como HTML.
-const date = value => new Date(value * 1000).toLocaleString('pt-BR', {timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}); // Mostra datas no horário de Brasília.
-const badge = status => `<span class="badge ${['','analysis','answered','solved'][statuses.indexOf(status)] || ''}">${escapeHTML(status)}</span>`; // Gera o marcador de situação.
-function notify(message, error = false) { // Exibe um retorno acessível sobre uma ação.
-  $('toast').textContent = (error ? 'Atenção: ' : '') + message; // Usa texto simples para evitar injeção de HTML.
-  $('toast').className = 'toast' + (error ? ' error' : ''); // Diferencia erros visualmente.
-  $('toast').hidden = false; // Mostra a notificação.
-  clearTimeout(toastTimer); // Reinicia o tempo quando chega outra mensagem.
-  toastTimer = setTimeout(() => $('toast').hidden = true, 6500); // Oculta depois de permitir a leitura.
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ouvidoria | Campo Real</title>
+    <meta
+      name="description"
+      content="Ouvidoria Campo Real: manifeste-se e acompanhe seu atendimento."
+    />
+    <style>
+:root {
+  --blue: #004c70;
+  --navy: #06344d;
+  --yellow: #ffdd00;
+  --ink: #17394b;
+  --muted: #637683;
+  --line: #dce5ea;
+  --paper: #f5f8fa;
+  --radius: 14px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
 }
-async function busy(button, task) { // Evita envio repetido e apresenta erros.
-  button.disabled = true; // Bloqueia o controle enquanto aguarda a resposta.
-  try { await task(); } catch (error) { notify(error.message || 'Não foi possível concluir.', true); } // Exibe a falha com clareza.
-  finally { button.disabled = false; } // Restaura o botão mesmo após erros.
+
+* {
+  box-sizing: border-box;
 }
-function demoData() { // Carrega apenas registros fictícios do navegador.
-  try { return JSON.parse(localStorage.getItem('camporeal-demo-v1')) || seedDemo(); } // Recupera o exemplo salvo.
-  catch { return seedDemo(); } // Recria os exemplos se o armazenamento estiver indisponível.
+
+body {
+  margin: 0;
+  line-height: 1.5;
 }
-function saveDemo(data) { // Salva o estado da demonstração sem simular segurança real.
-  try { localStorage.setItem('camporeal-demo-v1', JSON.stringify(data)); } // Persiste somente no navegador local.
-  catch { throw new Error('O navegador bloqueou o armazenamento local. Abra o arquivo em outro navegador.'); } // Informa restrições do navegador.
+
+[hidden] {
+  display: none !important;
 }
-function seedDemo() { // Cria manifestações fictícias para explorar as telas.
-  const now = Date.now() / 1000; // Usa o horário da abertura do demonstrador.
-  return [ // Define exemplos de atendimento.
-    {id:'CR-DEMO-001',email:demoEmails.aluno,anonymous:true,kind:'Reclamação',subject:'Iluminação no estacionamento',sector:'Infraestrutura',body:'A iluminação perto da saída do estacionamento precisa de manutenção. Seria possível verificar as lâmpadas desse trecho?',status:'Respondida',created:now-172800,messages:[{author:'Ouvidoria Campo Real',body:'Exemplo de resposta: encaminhamos o pedido à manutenção. Você pode acompanhar e nos informar se o problema foi resolvido.',created:now-86400}]}, // Exemplo anônimo com resposta.
-    {id:'CR-DEMO-002',email:demoEmails.aluno,anonymous:false,kind:'Sugestão',subject:'Mais horários para grupos de estudo',sector:'Ensino e aprendizagem',body:'Gostaria de sugerir mais horários para utilização das salas por grupos de estudo durante o período de provas.',status:'Em análise',created:now-86400,messages:[]}, // Exemplo identificado em análise.
-    {id:'CR-DEMO-003',email:'outro.aluno@camporeal.edu.br',anonymous:true,kind:'Elogio',subject:'Atendimento da biblioteca',sector:'Geral',body:'Quero registrar um elogio pelo apoio da equipe da biblioteca na pesquisa dos materiais para as atividades.',status:'Recebida',created:now-3600,messages:[]} // Exemplo que aparece somente para a equipe.
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  min-height: 44px;
+}
+
+:focus-visible {
+  outline: 3px solid #b08d00;
+  outline-offset: 3px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.demo-banner {
+  padding: 9px 20px;
+  text-align: center;
+  background: #fff4bc;
+  color: #665100;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.header {
+  min-height: 116px;
+  padding: 15px 6%;
+  background: white;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand img {
+  display: block;
+  width: 205px;
+  height: 86px;
+  object-fit: contain;
+}
+
+.header-label {
+  border-left: 1px solid var(--line);
+  padding-left: 28px;
+}
+
+.header-label strong {
+  display: block;
+  font-size: 24px;
+  letter-spacing: -0.5px;
+}
+
+.eyebrow,
+.step-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+}
+
+.account {
+  margin-left: auto;
+  text-align: right;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.account strong {
+  display: block;
+  color: var(--blue);
+  text-transform: capitalize;
+}
+
+.welcome {
+  max-width: 1320px;
+  margin: 46px auto 0;
+  display: grid;
+  grid-template-columns: 1.14fr 1fr;
+  padding: 0 48px;
+}
+
+.intro {
+  padding: 56px 48px 36px;
+  color: white;
+  background: var(--blue);
+  border-radius: 18px 0 0 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.intro:after {
+  content: "✦";
+  position: absolute;
+  right: -56px;
+  bottom: -170px;
+  font-size: 440px;
+  color: #ffffff08;
+  pointer-events: none;
+}
+
+.light {
+  color: #bed6e1;
+}
+
+h1 {
+  font-size: 48px;
+  line-height: 1.12;
+  letter-spacing: -1.8px;
+  margin: 24px 0;
+}
+
+h1 span {
+  color: var(--yellow);
+}
+
+.intro > p {
+  color: #d6e7ee;
+  max-width: 350px;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.intro-points {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 26px 0 40px;
+  font-size: 12px;
+  color: #e8f1f5;
+}
+
+.intro-bottom {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid #ffffff28;
+  padding-top: 22px;
+  position: relative;
+  z-index: 1;
+}
+
+.small-star {
+  color: var(--yellow);
+  font-size: 37px;
+}
+
+.intro-bottom p {
+  font-size: 11px;
+  color: #c6dce6;
+  margin: 0;
+  line-height: 1.8;
+}
+
+.login-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 18px 18px 0;
+  padding: 48px 44px 36px;
+}
+
+.step-label {
+  color: var(--blue);
+}
+
+h2 {
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: -0.8px;
+  margin: 14px 0;
+}
+
+.login-card > p,
+.workspace-heading p,
+.how p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#loginForm {
+  margin-top: 28px;
+}
+
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 15px 0 7px;
+}
+
+input:not([type="checkbox"]),
+select,
+textarea {
+  width: 100%;
+  border: 1px solid #cddae2;
+  border-radius: 8px;
+  padding: 12px 13px;
+  background: white;
+  color: var(--ink);
+  font-size: 13px;
+  min-height: 45px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 19px;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  background: white;
+  color: var(--blue);
+}
+
+.primary {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+}
+
+.primary:hover {
+  background: var(--navy);
+}
+
+#loginButton {
+  width: 100%;
+  margin-top: 18px;
+  justify-content: space-between;
+}
+
+.text-button {
+  border: 0;
+  background: none;
+  padding: 4px;
+  color: var(--blue);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.privacy-note {
+  border-top: 1px solid var(--line);
+  margin-top: 28px;
+  padding-top: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.privacy-note > span {
+  color: #a88b00;
+  font-size: 24px;
+}
+
+.privacy-note p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.privacy-note strong {
+  color: var(--ink);
+}
+
+.demo-accounts {
+  border: 1px dashed #c5ad3e;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 18px;
+}
+
+.demo-accounts p {
+  font-size: 11px;
+  margin: 0 0 5px;
+}
+
+.demo-accounts button {
+  border: 0;
+  background: #eef4f7;
+  border-radius: 5px;
+  color: var(--blue);
+  padding: 6px 10px;
+  margin: 2px;
+  font-size: 11px;
+}
+
+.how {
+  max-width: 1224px;
+  margin: 42px auto 40px;
+  padding: 0 48px;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr 1fr;
+  gap: 30px;
+}
+
+.how h2 {
+  font-size: 23px;
+  margin-top: 10px;
+}
+
+.how-step {
+  border-left: 1px solid var(--line);
+  padding-left: 24px;
+}
+
+.how-step > span {
+  color: var(--blue);
+  font-weight: 700;
+  font-size: 12px;
+  border-bottom: 3px solid var(--yellow);
+  padding-bottom: 4px;
+}
+
+h3 {
+  font-size: 13px;
+  margin: 18px 0 6px;
+}
+
+.how-step p {
+  margin: 0;
+  font-size: 11px;
+}
+
+footer {
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 6%;
+  color: #c6dce6;
+  font-size: 11px;
+  background: var(--navy);
+  align-items: center;
+}
+
+footer span {
+  color: #c4a300;
+  margin: 0 7px;
+}
+
+.workspace {
+  max-width: 1200px;
+  margin: 42px auto;
+  padding: 0 32px;
+  min-height: 55vh;
+}
+
+.workspace-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.workspace h1 {
+  font-size: 34px;
+  margin: 10px 0;
+  letter-spacing: -1px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin: 28px 0;
+}
+
+.stat {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 22px;
+}
+
+.stat strong {
+  display: block;
+  font-size: 29px;
+  line-height: 1.2;
+  color: var(--blue);
+}
+
+.stat span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.tab {
+  border: 0;
+  background: none;
+  color: var(--blue);
+  border-bottom: 3px solid var(--yellow);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.filters {
+  display: flex;
+  gap: 10px;
+}
+
+.filters input {
+  max-width: 230px;
+}
+
+.ticket-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.ticket-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  text-align: left;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 22px;
+  width: 100%;
+  color: var(--ink);
+}
+
+.ticket-card:hover {
+  border-color: #5d94ad;
+  box-shadow: 0 3px 12px #004c7009;
+}
+
+.ticket-card h3 {
+  margin: 7px 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.protocol {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 20px;
+  padding: 5px 10px;
+  background: #eef3f6;
+  color: #526d7c;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge.analysis {
+  background: #fff4c9;
+  color: #826a00;
+}
+
+.badge.answered {
+  background: #e4f0fb;
+  color: #235b8a;
+}
+
+.badge.solved {
+  background: #e5f3eb;
+  color: #28734c;
+}
+
+.empty {
+  text-align: center;
+  padding: 45px 20px;
+  background: white;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+dialog {
+  border: 0;
+  border-radius: 16px;
+  padding: 30px;
+  width: min(660px, 94vw);
+  max-height: 90vh;
+  color: var(--ink);
+  box-shadow: 0 20px 90px #032c4960;
+}
+
+dialog::backdrop {
+  background: #052c46a6;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dialog-header h2 {
+  overflow-wrap: anywhere;
+  font-size: 25px;
+}
+
+.close {
+  border: 0;
+  background: #eef3f6;
+  border-radius: 50%;
+  width: 38px;
+  min-height: 38px;
+  flex-shrink: 0;
+  font-size: 24px;
+  color: var(--blue);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.anonymous-option {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.anonymous-option input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+  flex-shrink: 0;
+}
+
+.anonymous-option small {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.form-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.detail-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 18px;
+  font-size: 13px;
+}
+
+.message {
+  border-left: 3px solid var(--line);
+  padding: 9px 14px;
+  margin: 15px 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.message p {
+  white-space: pre-wrap;
+  margin: 7px 0;
+}
+
+.message.staff {
+  border-color: var(--blue);
+  background: #f2f7fa;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--navy);
+  color: white;
+  padding: 15px 22px;
+  border-radius: 9px;
+  box-shadow: 0 5px 22px #0002;
+  max-width: min(580px, 92vw);
+  font-size: 13px;
+  z-index: 50;
+}
+
+.toast.error {
+  background: #873c32;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 950px) {
+  .welcome {
+    padding: 0 24px;
+  }
+  .intro {
+    padding: 40px 28px;
+  }
+  .login-card {
+    padding: 36px 28px;
+  }
+  h1 {
+    font-size: 39px;
+  }
+  .how {
+    padding: 0 28px;
+    gap: 18px;
+  }
+  .header {
+    padding: 14px 24px;
+    gap: 20px;
+  }
+  .brand img {
+    width: 170px;
+  }
+  .header-label {
+    padding-left: 20px;
+  }
+  .toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .filters {
+    width: 100%;
+  }
+  .filters input {
+    max-width: none;
+  }
+}
+
+@media (max-width: 650px) {
+  .header {
+    min-height: 95px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .brand img {
+    width: 145px;
+    height: 65px;
+  }
+  .header-label {
+    padding-left: 15px;
+  }
+  .header-label strong {
+    font-size: 20px;
+  }
+  .eyebrow {
+    font-size: 9px;
+  }
+  .account {
+    width: 100%;
+    text-align: left;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+  .account strong {
+    display: inline;
+    margin-right: 10px;
+  }
+  .welcome {
+    grid-template-columns: 1fr;
+    margin-top: 22px;
+    padding: 0 16px;
+  }
+  .intro {
+    border-radius: 14px 14px 0 0;
+    padding: 32px 26px;
+  }
+  .intro h1 {
+    font-size: 38px;
+  }
+  .intro-points {
+    margin-bottom: 22px;
+  }
+  .intro-bottom {
+    padding-top: 18px;
+  }
+  .login-card {
+    border-left: 1px solid var(--line);
+    border-top: 0;
+    border-radius: 0 0 14px 14px;
+    padding: 30px 26px;
+  }
+  .how {
+    grid-template-columns: 1fr;
+    padding: 0 22px;
+    margin-top: 30px;
+  }
+  .how-step {
+    padding: 0 0 0 18px;
+  }
+  .how-step h3 {
+    margin-top: 10px;
+  }
+  .workspace {
+    padding: 0 16px;
+    margin-top: 24px;
+  }
+  .workspace-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .workspace h1 {
+    font-size: 29px;
+  }
+  .stats {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .stat {
+    padding: 16px;
+  }
+  .filters {
+    flex-direction: column;
+  }
+  .ticket-card {
+    padding: 17px;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .ticket-card h3 {
+    font-size: 14px;
+  }
+  .ticket-card > .badge {
+    font-size: 9px;
+  }
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  dialog {
+    padding: 22px;
+  }
+  .detail-actions .button {
+    flex: 1;
+  }
+  footer {
+    padding: 16px 22px;
+    gap: 12px;
+    font-size: 10px;
+  }
+}
+
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.footer-brand img {
+  object-fit: contain;
+}
+
+#toggleRegister,
+#forgotPassword {
+  display: block;
+  text-align: left;
+  margin-top: 8px;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.tab {
+  border-bottom-color: transparent;
+}
+
+.tab.active {
+  border-bottom-color: var(--yellow);
+}
+
+.filters {
+  flex-wrap: wrap;
+}
+
+#sectorFilterField {
+  min-width: 170px;
+  flex: 1;
+}
+
+.ticket-card {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 650px) {
+  #sectorFilterField {
+    width: 100%;
+  }
+}
+
+</style>
+    
+  </head>
+  <body>
+    <div id="demoBanner" class="demo-banner" hidden>
+      Demonstração local • Dados fictícios • Não envie informações pessoais.
+    </div>
+    <header class="header">
+      <a class="brand" href="#inicio" aria-label="Campo Real, início">
+        <img
+          src="data:image/svg+xml;base64,PCEtLSBSZXByb2R1w6fDo28gdmV0b3JpYWwgZGUgcmVmZXLDqm5jaWEgYmFzZWFkYSBuYSBtYXJjYSBhbmV4YWRhOyBzdWJzdGl0dWlyIHBlbG8gYXJxdWl2byBvZmljaWFsIHBhcmEgcHVibGljYcOnw6NvLiAtLT4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgMzM1IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNlbnRybyBVbml2ZXJzaXTDoXJpbyBDYW1wbyBSZWFsLCBleGNlbMOqbmNpYSBubyBlbnNpbm8gc3VwZXJpb3IiPgo8IS0tIEVzdHJlbGEgYW1hcmVsYSBkYSBpZGVudGlkYWRlIHZpc3VhbC4gLS0+Cjxwb2x5Z29uIGZpbGw9IiNmZmRkMDAiIHBvaW50cz0iNTc1LDAgNjA2LDY2IDY3OCw3NCA2MjUsMTIzIDYzOSwxOTcgNTc1LDE2MCA1MDksMTk3IDUyMywxMjMgNDcwLDc0IDU0NCw2NiIvPgo8IS0tIE5vbWUgc3VwZXJpb3IgZSBub21lIHByaW5jaXBhbCBlbSBmb250ZSBzZXJpZmFkYS4gLS0+CjxnIGZpbGw9IiMwMDRjNzAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLFRpbWVzIE5ldyBSb21hbixzZXJpZiIgZm9udC13ZWlnaHQ9ImJvbGQiPgo8dGV4dCB4PSIzMzUiIHk9IjE0MSIgZm9udC1zaXplPSI0MCI+Q0VOVFJPPC90ZXh0Pgo8dGV4dCB4PSIzMzUiIHk9IjE4NyIgZm9udC1zaXplPSI0MCI+VU5JVkVSU0lUw4FSSU88L3RleHQ+Cjx0ZXh0IHg9IjM0MCIgeT0iMjgyIiBmb250LXNpemU9Ijk4IiB0ZXh0TGVuZ3RoPSI2NzUiIGxlbmd0aEFkanVzdD0ic3BhY2luZ0FuZEdseXBocyI+Q0FNUE8gUkVBTDwvdGV4dD4KPHRleHQgeD0iMzQwIiB5PSIzMzAiIGZvbnQtc2l6ZT0iMzciIHRleHRMZW5ndGg9IjY3NSIgbGVuZ3RoQWRqdXN0PSJzcGFjaW5nQW5kR2x5cGhzIj5FWENFTMOKTkNJQSBOTyBFTlNJTk8gU1VQRVJJT1I8L3RleHQ+CjwvZz4KPC9zdmc+"
+          alt="Centro Universitário Campo Real"
+          width="220"
+          height="108"
+        />
+      </a>
+      <div class="header-label">
+        <span class="eyebrow">CENTRO UNIVERSITÁRIO</span>
+        <strong>Ouvidoria</strong>
+      </div>
+      <div id="account" class="account"></div>
+    </header>
+    <main id="inicio">
+      <section id="welcome" class="welcome">
+        <div class="intro">
+          <span class="eyebrow light">OUVIDORIA CAMPO REAL</span>
+          <h1>
+            Sua voz faz
+            <br />
+            parte da mudança
+            <span>.</span>
+          </h1>
+          <p>
+            Um espaço para ouvir você, acolher suas ideias e construir uma faculdade
+            cada vez melhor.
+          </p>
+          <div class="intro-points">
+            <span>✓ Escuta com respeito</span>
+            <span>✓ Acompanhamento por protocolo</span>
+          </div>
+          <div class="intro-bottom">
+            <span class="small-star" aria-hidden="true">✦</span>
+            <p>
+              Reclamações, críticas, sugestões e elogios.
+              <br />
+              <strong>Toda manifestação importa.</strong>
+            </p>
+          </div>
+        </div>
+        <div class="login-card">
+          <span class="step-label">SEU ESPAÇO DE ESCUTA</span>
+          <h2>Vamos conversar?</h2>
+          <p>
+            Entre com seu e-mail institucional e senha. Se ainda não tem conta,
+            cadastre-se e depois faça o login.
+          </p>
+          <form id="loginForm">
+            <label for="email">E-mail institucional</label>
+            <input
+              id="email"
+              type="email"
+              required
+              maxlength="254"
+              autocomplete="username"
+            />
+            <label for="password">Senha</label>
+            <input
+              id="password"
+              type="password"
+              required
+              minlength="8"
+              maxlength="128"
+              autocomplete="current-password"
+            />
+            <div id="confirmField" hidden>
+              <label for="confirmPassword">Confirmar senha</label>
+              <input
+                id="confirmPassword"
+                type="password"
+                minlength="8"
+                maxlength="128"
+                autocomplete="new-password"
+              />
+            </div>
+            <button id="loginButton" class="button primary" type="submit">
+              Entrar →
+            </button>
+            <button id="toggleRegister" type="button" class="text-button">
+              Primeiro acesso? Criar conta de aluno
+            </button>
+            <button id="forgotPassword" type="button" class="text-button">
+              Esqueci minha senha
+            </button>
+            <p id="authHint" class="form-note">
+              Use seu e-mail @camporeal.edu.br. O cadastro verifica o domínio, mas não
+              comprova a titularidade do e-mail.
+            </p>
+          </form>
+          <div id="demoAccounts" class="demo-accounts" hidden>
+            <p>Explore os perfis fictícios:</p>
+            <button type="button" data-demo="aluno">Aluno</button>
+            <button type="button" data-demo="supervisor">Supervisor</button>
+            <button type="button" data-demo="diretor">Diretor</button>
+          </div>
+          <div class="privacy-note">
+            <span aria-hidden="true">◈</span>
+            <p>
+              <strong>Você escolhe como se identificar.</strong>
+              <br />
+              Na opção anônima, sua identidade fica oculta para a equipe de atendimento
+              e pode ser consultada somente pelo diretor. O login continua obrigatório.
+            </p>
+          </div>
+        </div>
+      </section>
+      <section id="workspace" class="workspace" hidden>
+        <div class="workspace-heading">
+          <div>
+            <span id="panelLabel" class="eyebrow">ÁREA DO ALUNO</span>
+            <h1 id="panelTitle">Minhas manifestações</h1>
+            <p id="panelDescription">
+              Acompanhe cada conversa, do primeiro contato à solução.
+            </p>
+          </div>
+          <button id="newTicket" class="button primary" type="button">
+            ＋ Nova manifestação
+          </button>
+        </div>
+        <div id="stats" class="stats"></div>
+        <div class="toolbar">
+          <div class="tabs" role="group" aria-label="Listas de manifestações">
+            <button id="allTab" class="tab active" type="button" aria-pressed="true">
+              Todas as manifestações
+            </button>
+            <button
+              id="archivedTab"
+              class="tab"
+              type="button"
+              aria-pressed="false"
+              hidden
+            >
+              Arquivadas
+            </button>
+          </div>
+          <div class="filters">
+            <div id="sectorFilterField" hidden>
+              <label class="sr-only" for="sectorFilter">
+                Filtrar área da manifestação
+              </label>
+              <select id="sectorFilter">
+                <option value="">Todas as áreas</option>
+              </select>
+            </div>
+            <label class="sr-only" for="search">Buscar manifestações</label>
+            <input
+              id="search"
+              type="search"
+              placeholder="Buscar assunto ou protocolo"
+            />
+            <label class="sr-only" for="statusFilter">Filtrar situação</label>
+            <select id="statusFilter">
+              <option value="">Todas as situações</option>
+              <option>Recebida</option>
+              <option>Em análise</option>
+              <option>Respondida</option>
+              <option>Resolvida</option>
+            </select>
+          </div>
+        </div>
+        <div id="ticketList" class="ticket-list"></div>
+      </section>
+      <section id="how" class="how">
+        <div>
+          <span class="eyebrow">SIMPLES, DO COMEÇO AO FIM</span>
+          <h2>Da sua voz à nossa ação.</h2>
+        </div>
+        <div class="how-step">
+          <span>01</span>
+          <h3>Conte o que aconteceu</h3>
+          <p>Escolha o tipo de manifestação e compartilhe seu relato.</p>
+        </div>
+        <div class="how-step">
+          <span>02</span>
+          <h3>Acompanhe a resposta</h3>
+          <p>Consulte o protocolo e converse com a ouvidoria.</p>
+        </div>
+        <div class="how-step">
+          <span>03</span>
+          <h3>Ajude a concluir</h3>
+          <p>Informe se foi resolvido ou peça uma nova análise.</p>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <div class="footer-brand">
+        <img src="data:image/svg+xml;base64,PCEtLSBSZXByb2R1w6fDo28gdmV0b3JpYWwgZGUgcmVmZXLDqm5jaWEgYmFzZWFkYSBuYSBtYXJjYSBhbmV4YWRhOyBzdWJzdGl0dWlyIHBlbG8gYXJxdWl2byBvZmljaWFsIHBhcmEgcHVibGljYcOnw6NvLiAtLT4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgMzM1IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNlbnRybyBVbml2ZXJzaXTDoXJpbyBDYW1wbyBSZWFsLCBleGNlbMOqbmNpYSBubyBlbnNpbm8gc3VwZXJpb3IiPgo8IS0tIEVzdHJlbGEgYW1hcmVsYSBkYSBpZGVudGlkYWRlIHZpc3VhbC4gLS0+Cjxwb2x5Z29uIGZpbGw9IiNmZmRkMDAiIHBvaW50cz0iNTc1LDAgNjA2LDY2IDY3OCw3NCA2MjUsMTIzIDYzOSwxOTcgNTc1LDE2MCA1MDksMTk3IDUyMywxMjMgNDcwLDc0IDU0NCw2NiIvPgo8IS0tIE5vbWUgc3VwZXJpb3IgZSBub21lIHByaW5jaXBhbCBlbSBmb250ZSBzZXJpZmFkYS4gLS0+CjxnIGZpbGw9IiNmZmZmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLFRpbWVzIE5ldyBSb21hbixzZXJpZiIgZm9udC13ZWlnaHQ9ImJvbGQiPgo8dGV4dCB4PSIzMzUiIHk9IjE0MSIgZm9udC1zaXplPSI0MCI+Q0VOVFJPPC90ZXh0Pgo8dGV4dCB4PSIzMzUiIHk9IjE4NyIgZm9udC1zaXplPSI0MCI+VU5JVkVSU0lUw4FSSU88L3RleHQ+Cjx0ZXh0IHg9IjM0MCIgeT0iMjgyIiBmb250LXNpemU9Ijk4IiB0ZXh0TGVuZ3RoPSI2NzUiIGxlbmd0aEFkanVzdD0ic3BhY2luZ0FuZEdseXBocyI+Q0FNUE8gUkVBTDwvdGV4dD4KPHRleHQgeD0iMzQwIiB5PSIzMzAiIGZvbnQtc2l6ZT0iMzciIHRleHRMZW5ndGg9IjY3NSIgbGVuZ3RoQWRqdXN0PSJzcGFjaW5nQW5kR2x5cGhzIj5FWENFTMOKTkNJQSBOTyBFTlNJTk8gU1VQRVJJT1I8L3RleHQ+CjwvZz4KPC9zdmc+" alt="Campo Real" width="100" height="50" />
+        <p>Ouvidoria</p>
+      </div>
+      <p>Escutar. Acolher. Transformar.</p>
+    </footer>
+    <dialog id="composeDialog">
+      <div class="dialog-header">
+        <div>
+          <span class="eyebrow">ESTAMOS AQUI PARA OUVIR</span>
+          <h2>Nova manifestação</h2>
+        </div>
+        <button
+          class="close"
+          data-close="composeDialog"
+          type="button"
+          aria-label="Fechar formulário"
+        >
+          ×
+        </button>
+      </div>
+      <form id="ticketForm">
+        <div class="form-row">
+          <div>
+            <label for="kind">Tipo de manifestação</label>
+            <select id="kind" name="kind">
+              <option>Reclamação</option>
+              <option>Crítica</option>
+              <option>Sugestão</option>
+              <option>Elogio</option>
+              <option>Solicitação</option>
+            </select>
+          </div>
+          <div>
+            <label for="sector">Área relacionada</label>
+            <select id="sector" name="sector">
+              <option>Geral</option>
+              <option>Coordenação de curso</option>
+              <option>Atendimento / Secretaria</option>
+              <option>Infraestrutura</option>
+              <option>Financeiro</option>
+              <option>Ensino e aprendizagem</option>
+              <option>Outros</option>
+            </select>
+          </div>
+        </div>
+        <label for="subject">Assunto</label>
+        <input
+          id="subject"
+          name="subject"
+          minlength="5"
+          maxlength="120"
+          placeholder="Resuma sua manifestação"
+          required
+        />
+        <label for="body">Seu relato</label>
+        <textarea
+          id="body"
+          name="body"
+          minlength="20"
+          maxlength="5000"
+          rows="5"
+          placeholder="Conte o que aconteceu e como podemos ajudar. Mínimo de 20 caracteres."
+          required
+        ></textarea>
+        <label class="anonymous-option">
+          <input id="anonymous" name="anonymous" type="checkbox" />
+          <span>
+            <strong>Enviar de forma anônima para o atendimento</strong>
+            <small>
+              Supervisores não verão seu e-mail. Somente o diretor poderá consultar sua
+              identidade; a consulta ficará registrada. Evite escrever seu nome no
+              relato.
+            </small>
+          </span>
+        </label>
+        <p class="form-note">
+          Você poderá consultar o protocolo e receber respostas mesmo na opção anônima.
+        </p>
+        <button class="button primary" type="submit">Enviar manifestação →</button>
+      </form>
+    </dialog>
+    <dialog id="detailDialog">
+      <div class="dialog-header">
+        <div>
+          <span id="detailProtocol" class="eyebrow"></span>
+          <h2 id="detailSubject"></h2>
+        </div>
+        <button
+          class="close"
+          data-close="detailDialog"
+          type="button"
+          aria-label="Fechar manifestação"
+        >
+          ×
+        </button>
+      </div>
+      <div id="detailContent"></div>
+      <div id="detailActions" class="detail-actions"></div>
+      <form id="replyForm">
+        <label for="replyBody">Escrever uma mensagem</label>
+        <textarea
+          id="replyBody"
+          rows="3"
+          minlength="3"
+          maxlength="5000"
+          required
+          placeholder="Continue a conversa por aqui..."
+        ></textarea>
+        <button class="button primary" type="submit">Enviar mensagem →</button>
+      </form>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+
+const DEMO = location.protocol === "file:";
+
+const statuses = ["Recebida", "Em análise", "Respondida", "Resolvida"];
+
+const demoEmails = {
+  aluno: "aluno.exemplo@camporeal.edu.br",
+  supervisor: "supervisor.exemplo@camporeal.edu.br",
+  diretor: "diretor.exemplo@camporeal.edu.br",
+};
+
+let user = null,
+  tickets = [],
+  activeId = null,
+  registerMode = false,
+  archiveView = false,
+  toastTimer;
+
+const escapeHTML = (text) =>
+  String(text ?? "").replace(
+    /[&<>"']/g,
+    (x) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[x],
+  );
+
+const date = (value) =>
+  new Date(value * 1e3).toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+
+const badge = (status) =>
+  `<span class="badge ${["", "analysis", "answered", "solved"][statuses.indexOf(status)] || ""}">${escapeHTML(status)}</span>`;
+
+function notify(message, error = false) {
+  $("toast").textContent = (error ? "Atenção: " : "") + message;
+  $("toast").className = "toast" + (error ? " error" : "");
+  $("toast").hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ($("toast").hidden = true), 6500);
+}
+
+async function busy(button, task) {
+  button.disabled = true;
+  try {
+    await task();
+  } catch (error) {
+    notify(error.message || "Não foi possível concluir.", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function demoData() {
+  try {
+    return JSON.parse(localStorage.getItem("camporeal-demo-v1")) || seedDemo();
+  } catch {
+    return seedDemo();
+  }
+}
+
+function saveDemo(data) {
+  try {
+    localStorage.setItem("camporeal-demo-v1", JSON.stringify(data));
+  } catch {
+    throw new Error(
+      "O navegador bloqueou o armazenamento local. Abra o arquivo em outro navegador.",
+    );
+  }
+}
+
+function seedDemo() {
+  const now = Date.now() / 1e3;
+  return [
+    {
+      id: "CR-DEMO-001",
+      email: demoEmails.aluno,
+      anonymous: true,
+      kind: "Reclamação",
+      subject: "Iluminação no estacionamento",
+      sector: "Infraestrutura",
+      body: "A iluminação perto da saída do estacionamento precisa de manutenção. Seria possível verificar as lâmpadas desse trecho?",
+      status: "Respondida",
+      created: now - 172800,
+      messages: [
+        {
+          author: "Ouvidoria Campo Real",
+          body: "Exemplo de resposta: encaminhamos o pedido à manutenção. Você pode acompanhar e nos informar se o problema foi resolvido.",
+          created: now - 86400,
+        },
+      ],
+    },
+    {
+      id: "CR-DEMO-002",
+      email: demoEmails.aluno,
+      anonymous: false,
+      kind: "Sugestão",
+      subject: "Mais horários para grupos de estudo",
+      sector: "Ensino e aprendizagem",
+      body: "Gostaria de sugerir mais horários para utilização das salas por grupos de estudo durante o período de provas.",
+      status: "Em análise",
+      created: now - 86400,
+      messages: [],
+    },
+    {
+      id: "CR-DEMO-003",
+      email: "outro.aluno@camporeal.edu.br",
+      anonymous: true,
+      kind: "Elogio",
+      subject: "Atendimento da biblioteca",
+      sector: "Geral",
+      body: "Quero registrar um elogio pelo apoio da equipe da biblioteca na pesquisa dos materiais para as atividades.",
+      status: "Recebida",
+      created: now - 3600,
+      messages: [],
+    },
   ];
 }
-async function demoAPI(path, data) { // Reproduz o fluxo com dados locais; não substitui a API protegida.
-  if (path === '/api/me') { if (!user) throw new Error('Entre para continuar.'); return user; } // Retorna o perfil fictício atual.
-  if (path === '/api/logout') { user = null; return {ok:true}; } // Encerra a demonstração da sessão.
-  const list = demoData().map(t => ({...t, archived: t.archived ?? (t.status === 'Resolvida')})); // Recupera os protocolos locais.
-  if (path === '/api/tickets' && !data) return list.filter(t => user.role !== 'aluno' || t.email === user.email).map(t => ({...t,identity:!t.anonymous || user.role === 'aluno' ? t.email : null,email:undefined})); // Oculta dados no fluxo de demonstração.
-  if (path === '/api/tickets') { // Registra um exemplo de manifestação.
-    const item = {...data,id:'CR-DEMO-' + Math.random().toString(16).slice(2,10).toUpperCase(),email:user.email,created:Date.now()/1000,status:'Recebida',archived:false,messages:[]}; // Associa a conta fictícia.
-    list.unshift(item); saveDemo(list); return {id:item.id}; // Persiste o exemplo.
+
+async function demoAPI(path, data) {
+  if (path === "/api/me") {
+    if (!user) throw new Error("Entre para continuar.");
+    return user;
   }
-  const item = list.find(t => t.id === data.id); // Localiza o protocolo selecionado.
-  if (!item) throw new Error('Protocolo não encontrado.'); // Trata exemplos removidos.
-  if (path === '/api/identity') { if(user.role !== 'diretor') throw new Error('Somente o diretor pode consultar.'); return {email:item.email}; } // Demonstra a consulta restrita.
-  if (path === '/api/reply') { item.archived = false; item.messages.push({author:user.role === 'aluno' ? 'Aluno' : 'Ouvidoria Campo Real',body:data.body,created:Date.now()/1000}); item.status = user.role === 'aluno' ? 'Em análise' : 'Respondida'; } // Acrescenta uma mensagem fictícia.
-  if (path === '/api/status') { item.archived = data.status === 'Resolvida'; item.status = data.status; item.messages.push({author:'Sistema',body:'Situação alterada para ' + data.status.toLowerCase() + '.',created:Date.now()/1000}); } // Registra o andamento do exemplo.
-  if (path === '/api/archive') { if (user.role === 'aluno') throw new Error('Somente a equipe pode arquivar.'); item.archived = data.archived; item.status = data.archived ? 'Resolvida' : 'Em análise'; item.messages.push({author:'Sistema',body:data.archived ? 'Manifestação resolvida e arquivada pelo atendimento.' : 'Manifestação desarquivada para nova análise.',created:Date.now()/1000}); } // Demonstra o arquivo compartilhado da equipe.
-  saveDemo(list); return {ok:true}; // Confirma a alteração local.
-}
-async function api(path, data) { // Centraliza a comunicação com o servidor real ou a prévia.
-  if (DEMO) return demoAPI(path, data); // Mantém a simulação separada da aplicação real.
-  const response = await fetch(path, {method:data ? 'POST' : 'GET',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':user?.csrf || ''},body:data ? JSON.stringify(data) : undefined}); // Envia sessão por cookie e token CSRF.
-  const result = await response.json(); // Interpreta a resposta.
-  if (!response.ok) { // Trata os erros antes de atualizar a interface.
-    if (response.status === 401) loggedOut(); // Volta ao acesso quando a sessão vence.
-    throw new Error(result.error || 'Não foi possível concluir a solicitação.'); // Exibe o erro retornado pelo servidor.
+  if (path === "/api/logout") {
+    user = null;
+    return {
+      ok: true,
+    };
   }
-  return result; // Entrega os dados autorizados.
-}
-function loggedOut() { // Restaura a apresentação pública.
-  user = null; tickets = []; activeId = null; archiveView = false; resetLogin(); $('sectorFilter').value = ''; $('search').value = ''; $('statusFilter').value = ''; // Descarta dados privados da memória da tela.
-  $('workspace').hidden = true; $('welcome').hidden = false; $('how').hidden = false; // Mostra a entrada.
-  $('account').replaceChildren(); $('ticketList').replaceChildren(); $('detailContent').replaceChildren(); // Limpa os dados exibidos.
-  document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); // Fecha janelas privadas.
-}
-async function loggedIn() { // Monta a área do perfil autenticado.
-  $('welcome').hidden = true; $('how').hidden = true; $('workspace').hidden = false; // Alterna para o painel.
-  const student = user.role === 'aluno'; // Identifica a experiência do aluno.
-  $('panelLabel').textContent = student ? 'ÁREA DO ALUNO' : 'GESTÃO DA OUVIDORIA'; // Nomeia a área atual.
-  $('panelTitle').textContent = student ? 'Minhas manifestações' : 'Central de manifestações'; // Adapta o título ao perfil.
-  $('panelDescription').textContent = student ? 'Acompanhe cada conversa, do primeiro contato à solução.' : 'Acolha os relatos, acompanhe os protocolos e responda aos alunos.'; // Explica a tarefa principal.
-  archiveView = false; $('archivedTab').hidden = student; $('sectorFilterField').hidden = student; $('sectorFilter').value = ''; $('search').value = ''; $('statusFilter').value = ''; // Limpa filtros ao trocar de perfil e mostra os controles somente à equipe.
-  $('newTicket').hidden = !student; // Restringe a criação ao perfil de aluno na interface.
-  $('account').innerHTML = `<strong>${escapeHTML(user.role)}</strong><span>${escapeHTML(user.email)}</span> <button class="text-button" id="logout" type="button">Sair</button>`; // Mostra os dados da própria sessão.
-  $('logout').onclick = event => busy(event.currentTarget, async () => {await api('/api/logout', {}); loggedOut();}); // Invalida a sessão no servidor.
-  await refresh(); // Busca as manifestações autorizadas.
-}
-async function refresh() { // Atualiza os protocolos e os indicadores.
-  tickets = await api('/api/tickets'); // Recebe apenas registros permitidos pelo servidor.
-  $('stats').innerHTML = [['Total de manifestações',tickets.length],['Em atendimento',tickets.filter(t => ['Recebida','Em análise'].includes(t.status)).length],['Respondidas',tickets.filter(t => t.status === 'Respondida').length],['Resolvidas',tickets.filter(t => t.status === 'Resolvida').length]].map(([label,count]) => `<div class="stat"><strong>${count}</strong><span>${label}</span></div>`).join(''); // Resume os registros recebidos.
-  const selectedSector = $('sectorFilter').value; // Mantém o filtro ativo após responder ou arquivar.
-  const sectors = [...new Set([...Array.from($('sector').options, option => option.value), ...tickets.map(t => t.sector)])].sort((a,b) => a.localeCompare(b, 'pt-BR')); // Inclui as áreas do formulário e áreas antigas do banco.
-  $('sectorFilter').innerHTML = '<option value="">Todas as áreas</option>' + sectors.map(sector => `<option value="${escapeHTML(sector)}">${escapeHTML(sector)}</option>`).join(''); // Escapa os textos antes de montar as opções.
-  $('sectorFilter').value = selectedSector; // Preserva a área escolhida nas duas abas.
-  renderList(); // Reaplica os filtros atuais.
-}
-function renderList() { // Exibe resultados de busca e situação.
-  const search = $('search').value.trim().toLocaleLowerCase('pt-BR'); // Normaliza a consulta digitada.
-  const staff = user?.role !== 'aluno'; // O aluno continua consultando todos os próprios protocolos, inclusive resolvidos.
-  $('allTab').classList.toggle('active', !archiveView); $('archivedTab').classList.toggle('active', archiveView); // Destaca a aba atual.
-  $('allTab').setAttribute('aria-pressed', String(!archiveView)); $('archivedTab').setAttribute('aria-pressed', String(archiveView)); // Anuncia a escolha a leitores de tela.
-  const filtered = tickets.filter(t => (!staff || Boolean(t.archived) === archiveView) && (!staff || !$('sectorFilter').value || t.sector === $('sectorFilter').value) && (!$('statusFilter').value || t.status === $('statusFilter').value) && (t.subject + ' ' + t.id).toLocaleLowerCase('pt-BR').includes(search)); // Combina aba, área, situação e busca sem alterar permissões de acesso.
-  $('ticketList').innerHTML = filtered.length ? filtered.map(t => `<button type="button" class="ticket-card" data-ticket="${escapeHTML(t.id)}"><div><span class="protocol">${escapeHTML(t.id)}</span><h3>${escapeHTML(t.subject)}</h3><span class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${t.anonymous ? 'Identidade restrita ao diretor' : 'Manifestação identificada'}</span></div>${badge(t.status)}${t.archived ? '<span class="badge">Arquivada</span>' : ''}</button>`).join('') : `<div class="empty"><h3>${archiveView ? 'Nenhuma manifestação arquivada nesta busca.' : 'Nenhuma manifestação por aqui.'}</h3><p>Ajuste os filtros${staff ? ' ou consulte a outra aba' : ' ou crie uma nova manifestação'}.</p></div>`; // Exibe cartões ou um estado vazio.
-}
-function showDetail(id) { // Abre o histórico do protocolo selecionado.
-  activeId = id; // Guarda o alvo das próximas ações.
-  const t = tickets.find(item => item.id === id); // Busca somente na lista autorizada recebida.
-  if (!t) return; // Evita abrir um protocolo ausente.
-  $('detailProtocol').textContent = t.id; $('detailSubject').textContent = t.subject; // Usa texto simples para protocolo e título.
-  const identity = t.anonymous ? 'Identidade restrita ao diretor' : `Identificado: ${t.identity || ''}`; // Não tenta deduzir o autor anônimo.
-  $('detailContent').innerHTML = `${badge(t.status)}${t.archived ? ' <span class="badge">Arquivada</span>' : ''}<p class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${escapeHTML(identity)}</p><p class="detail-body">${escapeHTML(t.body)}</p><h3>Histórico de atendimento</h3>${t.messages.length ? t.messages.map(m => `<div class="message ${m.author === 'Ouvidoria Campo Real' ? 'staff' : ''}"><strong>${escapeHTML(m.author)}</strong><span class="meta"> · ${date(m.created)}</span><p>${escapeHTML(m.body)}</p></div>`).join('') : '<p class="form-note">Aguardando atendimento. As respostas aparecerão aqui.</p>'}`; // Exibe relatos como texto escapado.
-  $('detailActions').replaceChildren(); // Limpa ações e identidades reveladas em aberturas anteriores.
-  if (user.role === 'aluno') { // Mostra as ações de confirmação do aluno.
-    action(t.status === 'Resolvida' ? 'Pedir nova análise' : '✓ Foi resolvido', () => updateStatus(t.status === 'Resolvida' ? 'Em análise' : 'Resolvida')); // Permite encerrar ou reabrir o atendimento.
-    if (t.status === 'Respondida') action('Ainda não foi resolvido', () => updateStatus('Em análise')); // Permite contestar a solução proposta.
-  } else { // Mostra as ações de atendimento.
-    if (t.archived) action('Desarquivar e retomar atendimento', () => updateArchive(false)); // Retoma sem perder nenhuma mensagem.
-    else { action('Marcar em análise', () => updateStatus('Em análise')); action('Resolver e arquivar', () => updateArchive(true)); } // A conclusão pela equipe arquiva automaticamente. // Atualiza o andamento institucional.
-    if (user.role === 'diretor' && t.anonymous) action('Consultar autoria restrita', async () => { // Exige consulta explícita do diretor.
-      const result = await api('/api/identity', {id:activeId}); // O servidor autoriza e registra a consulta.
-      const note = document.createElement('p'); note.className = 'form-note'; note.textContent = `Autoria: ${result.email}. Consulta registrada${DEMO ? ' apenas ilustrativa na demonstração' : ' na auditoria do servidor'}.`; // Mostra a identidade sem inserir HTML.
-      $('detailActions').append(note); // Mantém a informação dentro da janela atual.
+  const list = demoData().map((t) => ({
+    ...t,
+    archived: t.archived ?? t.status === "Resolvida",
+  }));
+  if (path === "/api/tickets" && !data)
+    return list
+      .filter((t) => user.role !== "aluno" || t.email === user.email)
+      .map((t) => ({
+        ...t,
+        identity: !t.anonymous || user.role === "aluno" ? t.email : null,
+        email: undefined,
+      }));
+  if (path === "/api/tickets") {
+    const item = {
+      ...data,
+      id: "CR-DEMO-" + Math.random().toString(16).slice(2, 10).toUpperCase(),
+      email: user.email,
+      created: Date.now() / 1e3,
+      status: "Recebida",
+      archived: false,
+      messages: [],
+    };
+    list.unshift(item);
+    saveDemo(list);
+    return {
+      id: item.id,
+    };
+  }
+  const item = list.find((t) => t.id === data.id);
+  if (!item) throw new Error("Protocolo não encontrado.");
+  if (path === "/api/identity") {
+    if (user.role !== "diretor") throw new Error("Somente o diretor pode consultar.");
+    return {
+      email: item.email,
+    };
+  }
+  if (path === "/api/reply") {
+    item.archived = false;
+    item.messages.push({
+      author: user.role === "aluno" ? "Aluno" : "Ouvidoria Campo Real",
+      body: data.body,
+      created: Date.now() / 1e3,
+    });
+    item.status = user.role === "aluno" ? "Em análise" : "Respondida";
+  }
+  if (path === "/api/status") {
+    item.archived = data.status === "Resolvida";
+    item.status = data.status;
+    item.messages.push({
+      author: "Sistema",
+      body: "Situação alterada para " + data.status.toLowerCase() + ".",
+      created: Date.now() / 1e3,
     });
   }
-  $('replyForm').hidden = user.role !== 'aluno' && Boolean(t.archived); // A equipe retoma antes de enviar outra resposta; o aluno ainda pode complementar.
-  $('replyForm').reset(); // Remove rascunhos de outros protocolos.
-  if (!$('detailDialog').open) $('detailDialog').showModal(); // Usa uma janela com foco controlado pelo navegador.
+  if (path === "/api/archive") {
+    if (user.role === "aluno") throw new Error("Somente a equipe pode arquivar.");
+    item.archived = data.archived;
+    item.status = data.archived ? "Resolvida" : "Em análise";
+    item.messages.push({
+      author: "Sistema",
+      body: data.archived
+        ? "Manifestação resolvida e arquivada pelo atendimento."
+        : "Manifestação desarquivada para nova análise.",
+      created: Date.now() / 1e3,
+    });
+  }
+  saveDemo(list);
+  return {
+    ok: true,
+  };
 }
-function action(label, handler) { // Cria um botão de ação sem eventos HTML embutidos.
-  const button = document.createElement('button'); button.type = 'button'; button.className = 'button'; button.textContent = label; // Define aparência e rótulo.
-  button.onclick = () => busy(button, handler); $('detailActions').append(button); // Trata erros e cliques repetidos.
+
+async function api(path, data) {
+  if (DEMO) return demoAPI(path, data);
+  const response = await fetch(path, {
+    method: data ? "POST" : "GET",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": user?.csrf || "",
+    },
+    body: data ? JSON.stringify(data) : undefined,
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    if (response.status === 401) loggedOut();
+    throw new Error(result.error || "Não foi possível concluir a solicitação.");
+  }
+  return result;
 }
-async function updateStatus(status) { // Solicita a alteração autorizada de situação.
-  await api('/api/status', {id:activeId,status}); await refresh(); showDetail(activeId); notify('Situação atualizada.'); // Recarrega o estado confirmado pelo servidor.
+
+function loggedOut() {
+  user = null;
+  tickets = [];
+  activeId = null;
+  archiveView = false;
+  resetLogin();
+  $("sectorFilter").value = "";
+  $("search").value = "";
+  $("statusFilter").value = "";
+  $("workspace").hidden = true;
+  $("welcome").hidden = false;
+  $("how").hidden = false;
+  $("account").replaceChildren();
+  $("ticketList").replaceChildren();
+  $("detailContent").replaceChildren();
+  document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
 }
-async function updateArchive(archived) { // Resolve e arquiva ou retoma uma manifestação na fila compartilhada da equipe.
-  await api('/api/archive', {id:activeId,archived}); await refresh(); $('detailDialog').close(); // A mudança só aparece depois da confirmação do servidor.
-  notify(archived ? 'Manifestação resolvida e movida para Arquivadas.' : 'Manifestação desarquivada e devolvida ao atendimento.'); // Indica em qual aba encontrar o protocolo.
+
+async function loggedIn() {
+  $("welcome").hidden = true;
+  $("how").hidden = true;
+  $("workspace").hidden = false;
+  const student = user.role === "aluno";
+  $("panelLabel").textContent = student ? "ÁREA DO ALUNO" : "GESTÃO DA OUVIDORIA";
+  $("panelTitle").textContent = student
+    ? "Minhas manifestações"
+    : "Central de manifestações";
+  $("panelDescription").textContent = student
+    ? "Acompanhe cada conversa, do primeiro contato à solução."
+    : "Acolha os relatos, acompanhe os protocolos e responda aos alunos.";
+  archiveView = false;
+  $("archivedTab").hidden = student;
+  $("sectorFilterField").hidden = student;
+  $("sectorFilter").value = "";
+  $("search").value = "";
+  $("statusFilter").value = "";
+  $("newTicket").hidden = !student;
+  $("account").innerHTML =
+    `<strong>${escapeHTML(user.role)}</strong><span>${escapeHTML(user.email)}</span> <button class="text-button" id="logout" type="button">Sair</button>`;
+  $("logout").onclick = (event) =>
+    busy(event.currentTarget, async () => {
+      await api("/api/logout", {});
+      loggedOut();
+    });
+  await refresh();
 }
-function setRegisterMode(enabled) { // Alterna entre entrar e criar conta, sem segunda etapa por e-mail.
-  registerMode = enabled; $('confirmField').hidden = !enabled; $('confirmPassword').required = enabled; // Solicita confirmação somente no cadastro.
-  $('password').autocomplete = enabled ? 'new-password' : 'current-password'; // Ajuda o gerenciador de senhas do navegador.
-  $('loginButton').textContent = enabled ? 'Criar minha conta →' : 'Entrar →'; // Explica exatamente o que o botão fará.
-  $('toggleRegister').textContent = enabled ? 'Já tenho conta. Entrar' : 'Primeiro acesso? Criar conta de aluno'; // Oferece retorno à tela de entrada.
-  $('forgotPassword').hidden = enabled; $('password').value = ''; $('confirmPassword').value = ''; // Limpa senhas ao trocar a operação.
+
+async function refresh() {
+  tickets = await api("/api/tickets");
+  $("stats").innerHTML = [
+    ["Total de manifestações", tickets.length],
+    [
+      "Em atendimento",
+      tickets.filter((t) => ["Recebida", "Em análise"].includes(t.status)).length,
+    ],
+    ["Respondidas", tickets.filter((t) => t.status === "Respondida").length],
+    ["Resolvidas", tickets.filter((t) => t.status === "Resolvida").length],
+  ]
+    .map(
+      ([label, count]) =>
+        `<div class="stat"><strong>${count}</strong><span>${label}</span></div>`,
+    )
+    .join("");
+  const selectedSector = $("sectorFilter").value;
+  const sectors = [
+    ...new Set([
+      ...Array.from($("sector").options, (option) => option.value),
+      ...tickets.map((t) => t.sector),
+    ]),
+  ].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  $("sectorFilter").innerHTML =
+    '<option value="">Todas as áreas</option>' +
+    sectors
+      .map(
+        (sector) =>
+          `<option value="${escapeHTML(sector)}">${escapeHTML(sector)}</option>`,
+      )
+      .join("");
+  $("sectorFilter").value = selectedSector;
+  renderList();
 }
-$('loginForm').onsubmit = event => { // Faz cadastro ou acesso com e-mail e senha.
-  event.preventDefault(); // Evita recarregar a página.
-  busy($('loginButton'), async () => { // Impede cliques repetidos durante a autenticação.
-    const email = $('email').value.trim().toLowerCase(); const password = $('password').value; // Preserva os caracteres da senha, inclusive espaços.
-    if (!/^[^\s@]+@camporeal\.edu\.br$/.test(email)) throw new Error('Use seu e-mail @camporeal.edu.br.'); // Oferece validação imediata do domínio.
-    if (registerMode && password !== $('confirmPassword').value) throw new Error('As senhas precisam ser iguais.'); // Evita cadastrar uma senha digitada incorretamente.
-    if (DEMO) { user = {email,role:'aluno'}; await loggedIn(); resetLogin(); return; } // No demonstrador, toda conta digitada continua fictícia.
-    await api(registerMode ? '/api/register' : '/api/login', {email,password}); // O servidor define o perfil e verifica a senha.
-    user = await api('/api/me'); await loggedIn(); resetLogin(); // Entra direto após o cadastro ou a senha correta.
+
+function renderList() {
+  const search = $("search").value.trim().toLocaleLowerCase("pt-BR");
+  const staff = user?.role !== "aluno";
+  $("allTab").classList.toggle("active", !archiveView);
+  $("archivedTab").classList.toggle("active", archiveView);
+  $("allTab").setAttribute("aria-pressed", String(!archiveView));
+  $("archivedTab").setAttribute("aria-pressed", String(archiveView));
+  const filtered = tickets.filter(
+    (t) =>
+      (!staff || Boolean(t.archived) === archiveView) &&
+      (!staff || !$("sectorFilter").value || t.sector === $("sectorFilter").value) &&
+      (!$("statusFilter").value || t.status === $("statusFilter").value) &&
+      (t.subject + " " + t.id).toLocaleLowerCase("pt-BR").includes(search),
+  );
+  $("ticketList").innerHTML = filtered.length
+    ? filtered
+        .map(
+          (t) =>
+            `<button type="button" class="ticket-card" data-ticket="${escapeHTML(t.id)}"><div><span class="protocol">${escapeHTML(t.id)}</span><h3>${escapeHTML(t.subject)}</h3><span class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${t.anonymous ? "Identidade restrita ao diretor" : "Manifestação identificada"}</span></div>${badge(t.status)}${t.archived ? '<span class="badge">Arquivada</span>' : ""}</button>`,
+        )
+        .join("")
+    : `<div class="empty"><h3>${archiveView ? "Nenhuma manifestação arquivada nesta busca." : "Nenhuma manifestação por aqui."}</h3><p>Ajuste os filtros${staff ? " ou consulte a outra aba" : " ou crie uma nova manifestação"}.</p></div>`;
+}
+
+function showDetail(id) {
+  activeId = id;
+  const t = tickets.find((item) => item.id === id);
+  if (!t) return;
+  $("detailProtocol").textContent = t.id;
+  $("detailSubject").textContent = t.subject;
+  const identity = t.anonymous
+    ? "Identidade restrita ao diretor"
+    : `Identificado: ${t.identity || ""}`;
+  $("detailContent").innerHTML =
+    `${badge(t.status)}${t.archived ? ' <span class="badge">Arquivada</span>' : ""}<p class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${escapeHTML(identity)}</p><p class="detail-body">${escapeHTML(t.body)}</p><h3>Histórico de atendimento</h3>${t.messages.length ? t.messages.map((m) => `<div class="message ${m.author === "Ouvidoria Campo Real" ? "staff" : ""}"><strong>${escapeHTML(m.author)}</strong><span class="meta"> · ${date(m.created)}</span><p>${escapeHTML(m.body)}</p></div>`).join("") : '<p class="form-note">Aguardando atendimento. As respostas aparecerão aqui.</p>'}`;
+  $("detailActions").replaceChildren();
+  if (user.role === "aluno") {
+    action(t.status === "Resolvida" ? "Pedir nova análise" : "✓ Foi resolvido", () =>
+      updateStatus(t.status === "Resolvida" ? "Em análise" : "Resolvida"),
+    );
+    if (t.status === "Respondida")
+      action("Ainda não foi resolvido", () => updateStatus("Em análise"));
+  } else {
+    if (t.archived)
+      action("Desarquivar e retomar atendimento", () => updateArchive(false));
+    else {
+      action("Marcar em análise", () => updateStatus("Em análise"));
+      action("Resolver e arquivar", () => updateArchive(true));
+    }
+    if (user.role === "diretor" && t.anonymous)
+      action("Consultar autoria restrita", async () => {
+        const result = await api("/api/identity", {
+          id: activeId,
+        });
+        const note = document.createElement("p");
+        note.className = "form-note";
+        note.textContent = `Autoria: ${result.email}. Consulta registrada${DEMO ? " apenas ilustrativa na demonstração" : " na auditoria do servidor"}.`;
+        $("detailActions").append(note);
+      });
+  }
+  $("replyForm").hidden = user.role !== "aluno" && Boolean(t.archived);
+  $("replyForm").reset();
+  if (!$("detailDialog").open) $("detailDialog").showModal();
+}
+
+function action(label, handler) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "button";
+  button.textContent = label;
+  button.onclick = () => busy(button, handler);
+  $("detailActions").append(button);
+}
+
+async function updateStatus(status) {
+  await api("/api/status", {
+    id: activeId,
+    status: status,
+  });
+  await refresh();
+  showDetail(activeId);
+  notify("Situação atualizada.");
+}
+
+async function updateArchive(archived) {
+  await api("/api/archive", {
+    id: activeId,
+    archived: archived,
+  });
+  await refresh();
+  $("detailDialog").close();
+  notify(
+    archived
+      ? "Manifestação resolvida e movida para Arquivadas."
+      : "Manifestação desarquivada e devolvida ao atendimento.",
+  );
+}
+
+function setRegisterMode(enabled) {
+  registerMode = enabled;
+  $("confirmField").hidden = !enabled;
+  $("confirmPassword").required = enabled;
+  $("password").autocomplete = enabled ? "new-password" : "current-password";
+  $("loginButton").textContent = enabled ? "Criar minha conta →" : "Entrar →";
+  $("toggleRegister").textContent = enabled
+    ? "Já tenho conta. Entrar"
+    : "Primeiro acesso? Criar conta de aluno";
+  $("forgotPassword").hidden = enabled;
+  $("password").value = "";
+  $("confirmPassword").value = "";
+}
+
+$("loginForm").onsubmit = (event) => {
+  event.preventDefault();
+  busy($("loginButton"), async () => {
+    const email = $("email").value.trim().toLowerCase();
+    const password = $("password").value;
+    if (!/^[^\s@]+@camporeal\.edu\.br$/.test(email))
+      throw new Error("Use seu e-mail @camporeal.edu.br.");
+    if (registerMode && password !== $("confirmPassword").value)
+      throw new Error("As senhas precisam ser iguais.");
+    if (registerMode) {
+      if (!DEMO)
+        await api("/api/register", {
+          email: email,
+          password: password,
+        });
+      resetLogin();
+      $("email").focus();
+      notify(
+        DEMO
+          ? "Cadastro ilustrativo concluído. Digite novamente o e-mail e a senha para explorar."
+          : "Conta criada. Digite novamente seu e-mail e sua senha para entrar.",
+      );
+      return;
+    }
+    if (DEMO) {
+      user = {
+        email: email,
+        role: "aluno",
+      };
+    } else {
+      await api("/api/login", {
+        email: email,
+        password: password,
+      });
+      user = await api("/api/me");
+    }
+    await loggedIn();
+    resetLogin();
   });
 };
-function resetLogin() { // Remove as credenciais da tela depois do acesso.
-  $('loginForm').reset(); setRegisterMode(false); // Volta ao modo padrão de entrada.
+
+function resetLogin() {
+  $("loginForm").reset();
+  setRegisterMode(false);
 }
-$('toggleRegister').onclick = () => setRegisterMode(!registerMode); // Permite criar somente contas de aluno pelo site.
-$('forgotPassword').onclick = () => notify('Peça ao responsável pela instalação para redefinir sua senha pelo menu python ouvidoria.py --contas.'); // Não usa links ou códigos de recuperação por e-mail.
-$('newTicket').onclick = () => { $('ticketForm').reset(); $('composeDialog').showModal(); }; // Abre um formulário limpo.
-$('ticketForm').onsubmit = event => { // Envia uma manifestação.
-  event.preventDefault(); // Preserva a navegação atual.
-  busy(event.submitter, async () => { // Impede protocolos duplicados por clique repetido.
-    const payload = Object.fromEntries(new FormData(event.currentTarget)); payload.anonymous = $('anonymous').checked; // Converte os campos e a escolha de anonimato.
-    const result = await api('/api/tickets', payload); $('composeDialog').close(); await refresh(); showDetail(result.id); notify('Manifestação registrada. Guarde seu protocolo: ' + result.id); // Exibe confirmação e acompanhamento.
+
+$("toggleRegister").onclick = () => setRegisterMode(!registerMode);
+
+$("forgotPassword").onclick = () =>
+  notify(
+    "Peça ao responsável pela instalação para redefinir sua senha pelo menu python ouvidoria.py --contas.",
+  );
+
+$("newTicket").onclick = () => {
+  $("ticketForm").reset();
+  $("composeDialog").showModal();
+};
+
+$("ticketForm").onsubmit = (event) => {
+  event.preventDefault();
+  busy(event.submitter, async () => {
+    const payload = Object.fromEntries(new FormData(event.currentTarget));
+    payload.anonymous = $("anonymous").checked;
+    const result = await api("/api/tickets", payload);
+    $("composeDialog").close();
+    await refresh();
+    showDetail(result.id);
+    notify("Manifestação registrada. Guarde seu protocolo: " + result.id);
   });
 };
-$('replyForm').onsubmit = event => { // Envia uma resposta ou complemento.
-  event.preventDefault(); // Mantém o protocolo aberto.
-  busy(event.submitter, async () => { await api('/api/reply', {id:activeId,body:$('replyBody').value.trim()}); await refresh(); showDetail(activeId); notify('Mensagem enviada.'); }); // Atualiza o histórico após confirmação.
+
+$("replyForm").onsubmit = (event) => {
+  event.preventDefault();
+  busy(event.submitter, async () => {
+    await api("/api/reply", {
+      id: activeId,
+      body: $("replyBody").value.trim(),
+    });
+    await refresh();
+    showDetail(activeId);
+    notify("Mensagem enviada.");
+  });
 };
-$('ticketList').onclick = event => { const card = event.target.closest('[data-ticket]'); if (card) showDetail(card.dataset.ticket); }; // Abre o cartão clicado.
-$('search').oninput = renderList; $('statusFilter').onchange = renderList; $('sectorFilter').onchange = renderList; // Reaplica filtros ao editar os controles.
-$('allTab').onclick = () => { archiveView = false; renderList(); }; // Volta à lista principal preservando os filtros.
-$('archivedTab').onclick = () => { if (user?.role === 'aluno') return; archiveView = true; renderList(); }; // Permite consultar o arquivo somente na interface da equipe.
-document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => $(button.dataset.close).close()); // Liga os botões de fechar às janelas.
-if (DEMO) { // Configura somente o arquivo de demonstração.
-  $('demoBanner').hidden = false; $('demoAccounts').hidden = false; $('loginButton').textContent = 'Explorar como aluno →'; $('password').required = false; // Identifica claramente a simulação.
-  document.querySelectorAll('[data-demo]').forEach(button => button.onclick = () => busy(button, async () => {user = {email:demoEmails[button.dataset.demo],role:button.dataset.demo}; await loggedIn();})); // Permite explorar os três perfis fictícios.
-} else { // Ao abrir pelo servidor, tenta recuperar uma sessão já validada.
-  api('/api/me').then(async result => {user = result; await loggedIn();}).catch(error => { if (error.message && !error.message.includes('Entre com') && !error.message.includes('expirou')) notify(error.message, true); }); // Mostra a entrada se não houver sessão.
+
+$("ticketList").onclick = (event) => {
+  const card = event.target.closest("[data-ticket]");
+  if (card) showDetail(card.dataset.ticket);
+};
+
+$("search").oninput = renderList;
+
+$("statusFilter").onchange = renderList;
+
+$("sectorFilter").onchange = renderList;
+
+$("allTab").onclick = () => {
+  archiveView = false;
+  renderList();
+};
+
+$("archivedTab").onclick = () => {
+  if (user?.role === "aluno") return;
+  archiveView = true;
+  renderList();
+};
+
+document
+  .querySelectorAll("[data-close]")
+  .forEach((button) => (button.onclick = () => $(button.dataset.close).close()));
+
+if (DEMO) {
+  $("demoBanner").hidden = false;
+  $("demoAccounts").hidden = false;
+  $("loginButton").textContent = "Explorar como aluno →";
+  $("password").required = false;
+  document.querySelectorAll("[data-demo]").forEach(
+    (button) =>
+      (button.onclick = () =>
+        busy(button, async () => {
+          user = {
+            email: demoEmails[button.dataset.demo],
+            role: button.dataset.demo,
+          };
+          await loggedIn();
+        })),
+  );
+} else {
+  api("/api/me")
+    .then(async (result) => {
+      user = result;
+      await loggedIn();
+    })
+    .catch((error) => {
+      if (
+        error.message &&
+        !error.message.includes("Entre com") &&
+        !error.message.includes("expirou")
+      )
+        notify(error.message, true);
+    });
 }
 
 </script>
