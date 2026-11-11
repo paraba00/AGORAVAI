@@ -19,12 +19,28 @@ O arquivo `ouvidoria.py` já contém o servidor e os conteúdos das telas. A có
 1. Na tela de acesso, clique em **Primeiro acesso? Criar conta de aluno**.
 2. Digite um e-mail `@camporeal.edu.br`.
 3. Escolha uma senha de **8 a 128 caracteres** e repita para confirmar.
-4. Clique em **Criar minha conta**. O acesso acontece imediatamente.
+4. Clique em **Criar minha conta**. O cadastro será confirmado, os campos serão limpos e você deverá digitar novamente e-mail e senha para entrar.
 5. Nas próximas visitas, use apenas e-mail e senha e clique em **Entrar**.
 
 O campo de e-mail começa vazio, sem texto de exemplo. O cadastro público é sempre de **aluno**; não existe escolha de perfil administrativo no site.
 
 **O domínio institucional é conferido, mas o sistema não comprova que a pessoa é dona do e-mail.** Esse é o limite da opção sem verificação por mensagem. Não use a informação como identidade institucional verificada.
+
+## Acessar no PC e no celular
+
+As mudanças feitas somente no seu computador não aparecem no GitHub. Esta versão mantém o `.env` local e acrescenta um modo próprio para testar na rede:
+
+```sh
+python ouvidoria.py --rede-local
+```
+
+O programa escuta a porta 8000 nas interfaces do computador e mostra sugestões de endereço. No celular, abra `http://IP_DO_COMPUTADOR:8000`. No PC, você pode usar esse mesmo endereço ou `http://localhost:8000`. As sessões são separadas por endereço, mas as contas e os relatos ficam no mesmo banco.
+
+Use o IPv4 da conexão Wi-Fi ou Ethernet mostrado por `ipconfig`. PC e celular precisam estar na mesma rede, sem isolamento entre dispositivos. Permita Python no firewall somente na rede privada; não é necessário desativar o firewall. Não use `0.0.0.0` ou `localhost` como endereço no celular. Mantenha o terminal e o computador ligados.
+
+A validação de origem continua ativa. Para endereços locais literais, o endereço de origem precisa corresponder ao Host da requisição e à porta real do servidor. Domínios externos só são aceitos quando configurados em `APP_URL` ou `ALLOWED_ORIGINS`; não há liberação por curinga. O token CSRF e as permissões continuam obrigatórios nas operações autenticadas.
+
+Esse modo é para testes na rede local, não publicação na internet. Em hospedagem, use proxy HTTPS e configure o endereço definitivo.
 
 ## Criar supervisor e diretor
 
@@ -109,10 +125,31 @@ HTML, CSS e JavaScript são os conteúdos recebidos pelo navegador e estão embu
 
 As marcas são reproduções vetoriais de referência das imagens fornecidas, não os arquivos originais. Antes da publicação oficial, substitua os SVGs azul e branco em `ASSETS`. O demonstrador contém cópias próprias que também precisam ser atualizadas.
 
+## Leitura do código e do banco
+
+O arquivo `ouvidoria.py` foi organizado com o servidor, as funções do banco e os comandos no início. O esquema SQL e os conteúdos HTML, CSS e JavaScript ficam ao final, sem repetir as mesmas telas para a demonstração. Comentários explicam decisões e permissões; a formatação usa blocos separados e uma instrução por linha quando possível. Não é necessário instalar formatadores para executar o programa.
+
+- [BANCO_DE_DADOS.md](BANCO_DE_DADOS.md): tabelas, campos, relações, integridade, dados sensíveis e recuperação.
+- [banco.sql](banco.sql): o mesmo esquema usado pelo programa, com as tabelas e colunas em linhas separadas.
+
+Para ver caminho, integridade e contagens sem imprimir dados pessoais:
+
+```sh
+python ouvidoria.py --banco
+```
+
+Para criar uma cópia consistente com a API do SQLite:
+
+```sh
+python ouvidoria.py --backup
+```
+
+Os backups ficam em `data/backups`; não são criptografados nem enviados para outro local automaticamente. Veja o guia do banco para proteção, retenção e restauração.
+
 ## Testes
 
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-Os testes usam banco temporário e verificam cadastro/login sem SMTP, domínio institucional, senha incorreta, bloqueio de tentativas, hashes, perfis, diretor único, recuperação local, migração, isolamento dos protocolos, autoria restrita, auditoria, respostas, solução/reabertura, CSRF, logout, migração de arquivamento, conclusão pela equipe, histórico arquivado e retomada pelo aluno. Os filtros de área, aba, busca e situação também foram verificados em conjunto. As telas precisam de conferência visual em computador e celular antes da publicação.
+Os testes usam banco temporário e verificam cadastro/login sem SMTP, domínio institucional, senha incorreta, bloqueio de tentativas, hashes, perfis, diretor único, recuperação local, migração, isolamento dos protocolos, autoria restrita, auditoria, respostas, solução/reabertura, CSRF, logout, migração de arquivamento, conclusão pela equipe, histórico arquivado e retomada pelo aluno. Os filtros de área, aba, busca e situação também foram verificados em conjunto. Há testes adicionais para cadastro sem sessão automática, origem de rede local e integridade dos backups. As telas precisam de conferência visual em computador e celular antes da publicação.
