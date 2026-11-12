@@ -18,10 +18,15 @@ class AccountTests(unittest.TestCase):
         self.setting = patch.object(
             app, "DB", Path(self.temp.name) / "data" / "test.sqlite3"
         )
+        self.key_setting = patch.object(
+            app, "KEY_PATH", Path(self.temp.name) / "segredos" / "email.key"
+        )
+        self.key_setting.start()
         self.setting.start()
         app.initialize()
 
     def tearDown(self):
+        self.key_setting.stop()
         self.setting.stop()
         self.temp.cleanup()
 
@@ -50,7 +55,12 @@ class AccountTests(unittest.TestCase):
         with app.database() as db:
             db.execute(
                 "INSERT INTO sessions VALUES (?,?,?,?)",
-                ("hash-falso", "equipe@camporeal.edu.br", 9999999999, "csrf-falso"),
+                (
+                    "hash-falso",
+                    app.account_id("equipe@camporeal.edu.br"),
+                    9999999999,
+                    "csrf-falso",
+                ),
             )
         with patch(
             "builtins.input", side_effect=["2", "equipe@camporeal.edu.br", "0"]
@@ -106,7 +116,7 @@ class AccountTests(unittest.TestCase):
             app.insert_account(db, "legado@camporeal.edu.br", "SenhaForte123", "aluno")
             db.execute(
                 "INSERT INTO sessions VALUES (?,?,?,?)",
-                ("nova", "legado@camporeal.edu.br", 9999999999, "csrf"),
+                ("nova", app.account_id("legado@camporeal.edu.br"), 9999999999, "csrf"),
             )
         app.initialize()
         with app.database() as db:
@@ -142,7 +152,9 @@ class AccountTests(unittest.TestCase):
                     "SELECT * FROM tickets WHERE id=?", ("CR-ANTIGO",)
                 ).fetchone()
                 self.assertEqual(row["archived"], 1)
-                self.assertEqual(row["email"], "antigo@camporeal.edu.br")
+                self.assertEqual(
+                    app.email_for(row["email"], db), "antigo@camporeal.edu.br"
+                )
                 self.assertEqual(row["body"], "Este relato já estava resolvido.")
                 self.assertEqual(
                     db.execute("PRAGMA integrity_check").fetchone()[0], "ok"
@@ -169,7 +181,7 @@ class AccountTests(unittest.TestCase):
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(
                 db.execute("SELECT email FROM accounts").fetchone()[0],
-                "backup@camporeal.edu.br",
+                app.account_id("backup@camporeal.edu.br"),
             )
         self.assertEqual(
             app.SCHEMA_SQL.strip(),
