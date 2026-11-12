@@ -3,3 +3,7 @@
 data/
 __pycache__/
 *.pyc
+
+# Chaves privadas de criptografia não pertencem ao repositório.
+segredos/
+*.key
