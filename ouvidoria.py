@@ -26,6 +26,13 @@ from pathlib import Path
 from urllib.parse import urlparse
 import re
 
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+except ImportError:
+    raise SystemExit(
+        "Instale a dependência: python -m pip install cryptography"
+    ) from None
+
 ROOT = Path(__file__).parent
 config = ROOT / ".env"
 if config.exists():
@@ -40,6 +47,7 @@ if config.exists():
                 value = value[1:-1]
             os.environ.setdefault(key.strip(), value)
 DB = Path(os.getenv("DATABASE_PATH", str(ROOT / "data" / "ouvidoria.sqlite3")))
+KEY_PATH = Path(os.getenv("DATA_KEY_FILE", str(ROOT / "segredos" / "email.key")))
 APP_URL = os.getenv("APP_URL", "http://localhost:8000").rstrip("/")
 DIRECTOR = os.getenv("DIRECTOR_EMAIL", "").strip().lower()
 SUPERVISORS = {
@@ -60,6 +68,7 @@ def database():
     connection = sqlite3.connect(DB, timeout=15)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys=ON")
+    connection.execute("PRAGMA secure_delete=ON")
     try:
         with connection:
             yield connection
@@ -91,6 +100,189 @@ def initialize():
             db.execute("UPDATE tickets SET archived=1 WHERE status='Resolvida'")
             db.execute("INSERT INTO auth_meta VALUES ('archive_v1','1')")
     os.chmod(DB, 0o600)
+    migrate_sensitive_data()
+
+
+def load_data_key(create=False):
+    """A chave fica fora do SQLite. Nunca é enviada ao navegador ou ao GitHub."""
+    if not KEY_PATH.exists():
+        if not create:
+            raise RuntimeError(
+                "Chave de e-mails não encontrada. Restaure a pasta segredos do backup; não gere outra chave para um banco já criptografado."
+            )
+        KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(KEY_PATH.parent, 0o700)
+        try:
+            descriptor = os.open(KEY_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(descriptor, "wb") as file:
+                file.write(Fernet.generate_key())
+                file.flush()
+                os.fsync(file.fileno())
+    key = KEY_PATH.read_bytes().strip()
+    try:
+        Fernet(key)
+    except (ValueError, TypeError):
+        raise RuntimeError(
+            "A chave de e-mails está inválida. Restaure a chave original da instalação."
+        ) from None
+    return key
+
+
+def keyed_digest(purpose, value):
+    master = base64.urlsafe_b64decode(load_data_key())
+    key = hmac.new(master, b"ouvidoria-keyed-digests-v1", hashlib.sha256).digest()
+    return hmac.new(key, (purpose + ":" + value).encode(), hashlib.sha256).hexdigest()
+
+
+def account_id(email):
+    if email.startswith("id:"):
+        return email
+    return "id:" + keyed_digest("email-index-v1", email.strip().lower())
+
+
+def ensure_identity(db, email):
+    """Mantém o vínculo por identificador opaco e guarda o endereço com Fernet."""
+    email = email.strip().lower()
+    identifier = account_id(email)
+    if not db.execute("SELECT 1 FROM identities WHERE id=?", (identifier,)).fetchone():
+        cipher = Fernet(load_data_key()).encrypt(email.encode()).decode()
+        db.execute(
+            "INSERT INTO identities(id,email_cipher) VALUES (?,?)", (identifier, cipher)
+        )
+    return identifier
+
+
+def email_for(identifier, db):
+    row = db.execute(
+        "SELECT email_cipher FROM identities WHERE id=?", (identifier,)
+    ).fetchone()
+    if not row:
+        raise RuntimeError(
+            "Identidade não encontrada. Verifique a migração e o backup da instalação."
+        )
+    return Fernet(load_data_key()).decrypt(row["email_cipher"].encode()).decode()
+
+
+def normalize_recovery(code):
+    if not isinstance(code, str) or len(code) > 120:
+        return ""
+    return re.sub(r"[-\s]", "", code).upper()
+
+
+def recovery_digest(identifier, code):
+    return keyed_digest("recovery-v1", identifier + ":" + normalize_recovery(code))
+
+
+def new_recovery_code():
+    value = secrets.token_hex(16).upper()
+    return "CR-" + "-".join(value[index : index + 4] for index in range(0, 32, 4))
+
+
+def rotate_recovery(db, identifier):
+    code = new_recovery_code()
+    db.execute(
+        "UPDATE accounts SET recovery_hash=? WHERE email=?",
+        (recovery_digest(identifier, code), identifier),
+    )
+    return code
+
+
+def replace_password(db, identifier, password):
+    check_password(password)
+    salt = secrets.token_hex(16)
+    count = db.execute(
+        "UPDATE accounts SET salt=?,hash=? WHERE email=?",
+        (salt, password_hash(password, salt), identifier),
+    ).rowcount
+    if not count:
+        raise ValueError("Conta não encontrada.")
+    db.execute("DELETE FROM sessions WHERE email=?", (identifier,))
+    return rotate_recovery(db, identifier)
+
+
+def migrate_sensitive_data():
+    """Converte as referências antigas sem trocar protocolos, senhas ou relatos."""
+    with database() as db:
+        marker = db.execute(
+            "SELECT value FROM auth_meta WHERE key='email_crypto_v1'"
+        ).fetchone()
+        key = load_data_key(create=marker is None)
+        fingerprint = hashlib.sha256(key).hexdigest()
+        if marker and not hmac.compare_digest(marker["value"], fingerprint):
+            raise RuntimeError(
+                "Esta chave não pertence ao banco. Restaure a chave original; os dados não foram alterados."
+            )
+        for table, column, definition in (
+            ("accounts", "recovery_hash", "TEXT NOT NULL DEFAULT ''"),
+            ("audit", "reason", "TEXT NOT NULL DEFAULT ''"),
+            ("tickets", "submission_id", "TEXT"),
+        ):
+            names = {
+                row["name"] for row in db.execute("PRAGMA table_info(" + table + ")")
+            }
+            if column not in names:
+                db.execute(
+                    "ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition
+                )
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ticket_submission ON tickets(email,submission_id) WHERE submission_id IS NOT NULL"
+        )
+        db.commit()
+        if marker:
+            pending = db.execute(
+                "SELECT 1 FROM auth_meta WHERE key='email_cleanup_pending'"
+            ).fetchone()
+            if pending:
+                finish_email_cleanup(db)
+            return
+        db.execute("BEGIN IMMEDIATE")
+        for table, column in (
+            ("accounts", "email"),
+            ("tickets", "email"),
+            ("audit", "actor"),
+        ):
+            rows = db.execute(
+                "SELECT DISTINCT " + column + " AS address FROM " + table
+            ).fetchall()
+            for row in rows:
+                email = row["address"]
+                if "@" not in email or email.startswith("id:"):
+                    continue
+                identifier = ensure_identity(db, email)
+                db.execute(
+                    "UPDATE " + table + " SET " + column + "=? WHERE " + column + "=?",
+                    (identifier, email),
+                )
+        db.execute("DELETE FROM sessions")
+        db.execute("DELETE FROM limits")
+        if db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='codes'"
+        ).fetchone():
+            db.execute("DELETE FROM codes")
+        db.execute(
+            "INSERT INTO auth_meta(key,value) VALUES ('email_crypto_v1',?)",
+            (fingerprint,),
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO auth_meta(key,value) VALUES ('email_cleanup_pending','1')"
+        )
+        db.commit()
+        finish_email_cleanup(db)
+
+
+def finish_email_cleanup(db):
+    """Remove páginas e quadros antigos após a conversão, sem apagar backups do usuário."""
+    db.execute("VACUUM")
+    checkpoint = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    if checkpoint and checkpoint[0] != 0:
+        raise RuntimeError(
+            "A migração precisa concluir a limpeza do SQLite. Feche outras instâncias do programa e execute novamente."
+        )
+    db.execute("DELETE FROM auth_meta WHERE key='email_cleanup_pending'")
+    db.commit()
 
 
 def origin_key(value):
@@ -134,7 +326,8 @@ def check_password(password):
 
 
 def insert_account(db, email, password, profile):
-    """Grava uma conta com sal aleatório; só o cadastro público fixa o perfil aluno."""
+    """Cria a conta sem guardar o e-mail ou o código de recuperação em texto simples."""
+    email = email.strip().lower()
     if not INSTITUTIONAL.fullmatch(email) or profile not in (
         "aluno",
         "supervisor",
@@ -142,18 +335,20 @@ def insert_account(db, email, password, profile):
     ):
         raise ValueError("Use um e-mail @camporeal.edu.br e um perfil válido.")
     check_password(password)
+    identifier = ensure_identity(db, email)
     salt = secrets.token_hex(16)
     db.execute(
-        "INSERT INTO accounts VALUES (?,?,?,?,?)",
-        (email, salt, password_hash(password, salt), profile, time.time()),
+        "INSERT INTO accounts(email,salt,hash,role,created) VALUES (?,?,?,?,?)",
+        (identifier, salt, password_hash(password, salt), profile, time.time()),
     )
+    return rotate_recovery(db, identifier)
 
 
 def role(email):
     """Lê a permissão no banco, sem confiar no perfil enviado pelo navegador."""
     with database() as db:
         account = db.execute(
-            "SELECT role FROM accounts WHERE email=?", (email,)
+            "SELECT role FROM accounts WHERE email=?", (account_id(email),)
         ).fetchone()
         if not account:
             raise Error(401, "Entre com seu e-mail e senha para continuar.")
@@ -176,7 +371,7 @@ def manage_accounts():
                     for row in db.execute(
                         "SELECT email,role FROM accounts ORDER BY role,email"
                     ):
-                        print(row["role"] + ": " + row["email"])
+                        print(row["role"] + ": " + email_for(row["email"], db))
                 continue
             if option not in ("1", "2"):
                 print("Escolha uma das opções do menu.")
@@ -195,22 +390,17 @@ def manage_accounts():
             check_password(password)
             with database() as db:
                 if option == "1":
-                    insert_account(db, email, password, profile)
+                    recovery = insert_account(db, email, password, profile)
                 else:
-                    salt = secrets.token_hex(16)
-                    changed = db.execute(
-                        "UPDATE accounts SET salt=?,hash=? WHERE email=?",
-                        (salt, password_hash(password, salt), email),
-                    ).rowcount
-                    if not changed:
-                        raise ValueError(
-                            "Conta não encontrada. Use a opção criar conta, caso ainda não exista."
-                        )
-                    db.execute("DELETE FROM sessions WHERE email=?", (email,))
+                    recovery = replace_password(db, account_id(email), password)
             print(
                 "Conta criada."
                 if option == "1"
-                else "Senha redefinida; os acessos anteriores foram encerrados."
+                else "Senha redefinida; sessões antigas encerradas."
+            )
+            print("Código de recuperação (exibido somente agora):", recovery)
+            print(
+                "Entregue este código apenas ao titular da conta e peça para guardá-lo em local privado."
             )
         except sqlite3.IntegrityError:
             print(
@@ -299,7 +489,17 @@ class Handler(BaseHTTPRequestHandler):
                     if path == "/api/me":
                         return self.send(
                             200,
-                            {"email": email, "role": profile, "csrf": session["csrf"]},
+                            {
+                                "email": email_for(email, db),
+                                "role": profile,
+                                "csrf": session["csrf"],
+                                "has_recovery_code": bool(
+                                    db.execute(
+                                        "SELECT recovery_hash FROM accounts WHERE email=?",
+                                        (email,),
+                                    ).fetchone()["recovery_hash"]
+                                ),
+                            },
                         )
                     if path == "/api/tickets":
                         query = (
@@ -315,7 +515,7 @@ class Handler(BaseHTTPRequestHandler):
                             ticket = dict(row)
                             owner = ticket.pop("email")
                             ticket["identity"] = (
-                                owner
+                                email_for(owner, db)
                                 if not ticket["anonymous"] or profile == "aluno"
                                 else None
                             )
@@ -326,6 +526,18 @@ class Handler(BaseHTTPRequestHandler):
                                     (ticket["id"],),
                                 )
                             ]
+                            ticket["identity_accesses"] = (
+                                [
+                                    dict(event)
+                                    for event in db.execute(
+                                        "SELECT reason,created FROM audit WHERE ticket=? AND action='Consulta de autoria restrita' ORDER BY id",
+                                        (ticket["id"],),
+                                    )
+                                ]
+                                if owner == email or profile == "diretor"
+                                else []
+                            )
+                            ticket.pop("submission_id", None)
                             tickets.append(ticket)
                         return self.send(200, tickets)
                     raise Error(404, "Recurso não encontrado.")
@@ -412,24 +624,50 @@ class Handler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             now = time.time()
             with database() as db:
-                if path in ("/api/login", "/api/register"):
+                if path in ("/api/login", "/api/register", "/api/recover"):
                     self.limit(db, "auth-ip:" + self.client_address[0], 60, 600)
                     email = self.text(data, "email", 1, 254).lower()
                     if not INSTITUTIONAL.fullmatch(email):
                         raise Error(400, "Use seu e-mail @camporeal.edu.br.")
-                    self.limit(db, "auth-email:" + email, 15, 600)
+                    identifier = account_id(email)
+                    self.limit(db, "auth-email:" + identifier, 15, 600)
                     password = data.get("password")
                     try:
                         check_password(password)
                     except ValueError as error:
                         raise Error(400, str(error)) from None
+                    if path == "/api/recover":
+                        self.limit(db, "recover:" + identifier, 5, 900)
+                        supplied = data.get("recovery_code", "")
+                        db.execute("BEGIN IMMEDIATE")
+                        account = db.execute(
+                            "SELECT * FROM accounts WHERE email=?", (identifier,)
+                        ).fetchone()
+                        expected = account["recovery_hash"] if account else ""
+                        candidate = recovery_digest(identifier, supplied)
+                        if not expected or not hmac.compare_digest(expected, candidate):
+                            raise Error(
+                                400,
+                                "Não foi possível recuperar. Confira o e-mail e o código de recuperação.",
+                            )
+                        recovery = replace_password(db, identifier, password)
+                        return self.success(
+                            db,
+                            200,
+                            {
+                                "ok": True,
+                                "recovery_code": recovery,
+                                "message": "Senha alterada. Guarde o novo código e faça login.",
+                            },
+                            self.cookie("", 0),
+                        )
                     if path == "/api/register":
                         db.execute("BEGIN IMMEDIATE")
                         exists = db.execute(
-                            "SELECT 1 FROM accounts WHERE email=?", (email,)
+                            "SELECT 1 FROM accounts WHERE email=?", (identifier,)
                         ).fetchone()
                         legacy = db.execute(
-                            "SELECT 1 FROM tickets WHERE email=? LIMIT 1", (email,)
+                            "SELECT 1 FROM tickets WHERE email=? LIMIT 1", (identifier,)
                         ).fetchone()
                         if (
                             exists
@@ -441,18 +679,19 @@ class Handler(BaseHTTPRequestHandler):
                                 409,
                                 "Conta existente ou reservada. Entre com sua senha ou peça ao responsável para criar ou recuperar a conta.",
                             )
-                        insert_account(db, email, password, "aluno")
+                        recovery = insert_account(db, email, password, "aluno")
                         return self.success(
                             db,
                             201,
                             {
                                 "ok": True,
-                                "message": "Conta criada. Entre com seu e-mail e senha.",
+                                "message": "Conta criada. Guarde o código e entre com seu e-mail e senha.",
+                                "recovery_code": recovery,
                             },
                         )
                     else:
                         account = db.execute(
-                            "SELECT * FROM accounts WHERE email=?", (email,)
+                            "SELECT * FROM accounts WHERE email=?", (identifier,)
                         ).fetchone()
                         salt = account["salt"] if account else "0" * 32
                         candidate = password_hash(password, salt)
@@ -467,7 +706,7 @@ class Handler(BaseHTTPRequestHandler):
                     token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
                     db.execute(
                         "INSERT INTO sessions VALUES (?,?,?,?)",
-                        (digest(token), email, now + 28800, csrf),
+                        (digest(token), identifier, now + 28800, csrf),
                     )
                     return self.success(
                         db, 200, {"ok": True}, self.cookie(token, 28800)
@@ -482,11 +721,36 @@ class Handler(BaseHTTPRequestHandler):
                     db.execute("DELETE FROM sessions WHERE hash=?", (session["hash"],))
                     return self.success(db, 200, {"ok": True}, self.cookie("", 0))
                 self.limit(db, "write:" + email, 60, 600)
+                if path == "/api/recovery-code":
+                    self.limit(db, "code-change:" + email, 8, 900)
+                    current = data.get("current_password")
+                    if not isinstance(current, str) or len(current) > 128:
+                        raise Error(400, "Informe sua senha atual.")
+                    db.execute("BEGIN IMMEDIATE")
+                    account = db.execute(
+                        "SELECT * FROM accounts WHERE email=?", (email,)
+                    ).fetchone()
+                    if not hmac.compare_digest(
+                        account["hash"], password_hash(current, account["salt"])
+                    ):
+                        raise Error(400, "Senha atual incorreta.")
+                    return self.success(
+                        db,
+                        200,
+                        {"ok": True, "recovery_code": rotate_recovery(db, email)},
+                    )
                 if path == "/api/tickets":
                     if profile != "aluno":
                         raise Error(
                             403,
                             "Use uma conta de aluno para registrar uma manifestação.",
+                        )
+                    if data.get("confirmed") is not True:
+                        raise Error(400, "Revise a manifestação e confirme o envio.")
+                    submission = self.text(data, "submission_id", 16, 80)
+                    if not re.fullmatch(r"[a-zA-Z0-9_-]{16,80}", submission):
+                        raise Error(
+                            400, "Identificação do envio inválida. Atualize a página."
                         )
                     subject, body = self.text(data, "subject", 5, 120), self.text(
                         data, "body", 20, 5000
@@ -496,11 +760,35 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     if kind not in TYPES or type(data.get("anonymous")) is not bool:
                         raise Error(400, "Tipo ou identificação inválidos.")
+                    db.execute("BEGIN IMMEDIATE")
+                    previous = db.execute(
+                        "SELECT * FROM tickets WHERE email=? AND submission_id=?",
+                        (email, submission),
+                    ).fetchone()
+                    if previous:
+                        matches = all(
+                            previous[key] == value
+                            for key, value in {
+                                "subject": subject,
+                                "body": body,
+                                "kind": kind,
+                                "sector": sector,
+                                "anonymous": int(data["anonymous"]),
+                            }.items()
+                        )
+                        if not matches:
+                            raise Error(
+                                409,
+                                "Este envio já foi usado com outro conteúdo. Abra uma nova manifestação.",
+                            )
+                        return self.success(
+                            db, 200, {"id": previous["id"], "duplicate": True}
+                        )
                     ticket_id = (
                         "CR-" + time.strftime("%Y") + "-" + secrets.token_hex(4).upper()
                     )
                     db.execute(
-                        "INSERT INTO tickets(id,email,anonymous,kind,subject,sector,body,status,created) VALUES (?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO tickets(id,email,anonymous,kind,subject,sector,body,status,created,submission_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
                         (
                             ticket_id,
                             email,
@@ -511,6 +799,7 @@ class Handler(BaseHTTPRequestHandler):
                             body,
                             "Recebida",
                             now,
+                            submission,
                         ),
                     )
                     return self.success(db, 201, {"id": ticket_id})
@@ -560,11 +849,14 @@ class Handler(BaseHTTPRequestHandler):
                         raise Error(
                             403, "Somente o diretor pode consultar a autoria restrita."
                         )
+                    reason = self.text(data, "reason", 20, 2000)
                     db.execute(
-                        "INSERT INTO audit(actor,action,ticket,created) VALUES (?,?,?,?)",
-                        (email, "Consulta de autoria restrita", ticket_id, now),
+                        "INSERT INTO audit(actor,action,ticket,created,reason) VALUES (?,?,?,?,?)",
+                        (email, "Consulta de autoria restrita", ticket_id, now, reason),
                     )
-                    return self.success(db, 200, {"email": ticket["email"]})
+                    return self.success(
+                        db, 200, {"email": email_for(ticket["email"], db)}
+                    )
                 if path == "/api/reply":
                     body = self.text(data, "body", 3, 5000)
                     db.execute(
@@ -765,7 +1057,11 @@ def main():
     if args.backup:
         print("Backup criado:", backup_database())
         print(
-            "Guarde uma cópia protegida em outro local. O arquivo contém dados sensíveis e não é criptografado."
+            "Guarde uma cópia protegida em outro local. O arquivo contém relatos sensíveis, embora os e-mails estejam cifrados."
+        )
+        print("Guarde também a chave separadamente:", KEY_PATH)
+        print(
+            "Sem a chave original, os e-mails desse backup não poderão ser recuperados."
         )
         return
 
@@ -806,20 +1102,27 @@ SCHEMA_SQL = r"""
 -- Estrutura do banco SQLite da Ouvidoria Campo Real.
 -- O programa aplica este mesmo esquema e suas migrações sem apagar dados antigos.
 
--- Contas e permissões. A senha original nunca é guardada.
+-- E-mails cifrados. A chave fica fora do banco, em segredos/email.key.
+CREATE TABLE IF NOT EXISTS identities (
+    id TEXT PRIMARY KEY,
+    email_cipher TEXT NOT NULL
+);
+
+-- Contas e permissões. email contém o identificador opaco de identities.
 CREATE TABLE IF NOT EXISTS accounts (
     email   TEXT PRIMARY KEY,
     salt    TEXT NOT NULL,
     hash    TEXT NOT NULL,
     role    TEXT NOT NULL CHECK (role IN ('aluno', 'supervisor', 'diretor')),
-    created REAL NOT NULL
+    created REAL NOT NULL,
+    recovery_hash TEXT NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_director
     ON accounts (role)
     WHERE role = 'diretor';
 
--- Acesso temporário. hash representa o token de sessão, não a senha.
+-- Acesso temporário. hash é o token de sessão; email é um identificador opaco.
 CREATE TABLE IF NOT EXISTS sessions (
     hash    TEXT PRIMARY KEY,
     email   TEXT NOT NULL,
@@ -827,7 +1130,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     csrf    TEXT NOT NULL
 );
 
--- Relato original. anonymous restringe a autoria no atendimento;
+-- Relato original. email é um identificador opaco, não o endereço legível.
+-- anonymous restringe a autoria no atendimento;
 -- archived organiza a fila sem excluir o protocolo.
 CREATE TABLE IF NOT EXISTS tickets (
     id        TEXT PRIMARY KEY,
@@ -839,7 +1143,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     body      TEXT NOT NULL,
     status    TEXT NOT NULL,
     created   REAL NOT NULL,
-    archived  INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))
+    archived  INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    submission_id TEXT
 );
 
 -- Conversa do protocolo. A chave estrangeira evita mensagens órfãs.
@@ -851,16 +1156,18 @@ CREATE TABLE IF NOT EXISTS messages (
     created REAL NOT NULL
 );
 
--- Ações sensíveis: consulta de autoria, arquivamento e desarquivamento.
+-- Ações sensíveis. actor é identificador opaco; reason explica a consulta ao aluno.
 CREATE TABLE IF NOT EXISTS audit (
     id      INTEGER PRIMARY KEY,
     actor   TEXT NOT NULL,
     action  TEXT NOT NULL,
     ticket  TEXT NOT NULL,
-    created REAL NOT NULL
+    created REAL NOT NULL,
+    reason TEXT NOT NULL DEFAULT ''
 );
 
--- Contadores temporários para limitar tentativas de acesso e alterações.
+-- O índice ticket_submission é criado pela migração após garantir submission_id.
+-- Contadores de acesso usam identificadores, sem e-mail legível.
 CREATE TABLE IF NOT EXISTS limits (
     key   TEXT PRIMARY KEY,
     hits  INTEGER NOT NULL,
@@ -876,7 +1183,9 @@ CREATE TABLE IF NOT EXISTS auth_meta (
 
 # Telas do navegador, mantidas aqui para permitir baixar apenas este arquivo.
 ASSETS = {
-    "app.js": r""""use strict";
+    "app.js": r"""let pendingTicket = null;
+let identityTicketId = null;
+("use strict");
 
 const $ = (id) => document.getElementById(id);
 
@@ -1048,9 +1357,14 @@ async function demoAPI(path, data) {
   if (!item) throw new Error("Protocolo não encontrado.");
   if (path === "/api/identity") {
     if (user.role !== "diretor") throw new Error("Somente o diretor pode consultar.");
-    return {
-      email: item.email,
-    };
+    if (!data.reason || data.reason.trim().length < 20)
+      throw new Error("Escreva uma justificativa com pelo menos 20 caracteres.");
+    item.identity_accesses = [
+      ...(item.identity_accesses || []),
+      { reason: data.reason.trim(), created: Date.now() / 1000 },
+    ];
+    saveDemo(list);
+    return { email: item.email };
   }
   if (path === "/api/reply") {
     item.archived = false;
@@ -1145,7 +1459,15 @@ async function loggedIn() {
   $("statusFilter").value = "";
   $("newTicket").hidden = !student;
   $("account").innerHTML =
-    `<strong>${escapeHTML(user.role)}</strong><span>${escapeHTML(user.email)}</span> <button class="text-button" id="logout" type="button">Sair</button>`;
+    `<strong>${escapeHTML(user.role)}</strong><span>${escapeHTML(user.email)}</span> <button class="text-button" id="manageRecovery" type="button">Código de recuperação</button> <button class="text-button" id="logout" type="button">Sair</button>`;
+  $("manageRecovery").onclick = () => {
+    $("rotateCodeForm").reset();
+    $("rotateCodeDialog").showModal();
+  };
+  if (!DEMO && !user.has_recovery_code)
+    notify(
+      "Sua conta ainda não tem código de recuperação. Use Código de recuperação para gerar e guardar o seu.",
+    );
   $("logout").onclick = (event) =>
     busy(event.currentTarget, async () => {
       await api("/api/logout", {});
@@ -1207,7 +1529,7 @@ function renderList() {
     ? filtered
         .map(
           (t) =>
-            `<button type="button" class="ticket-card" data-ticket="${escapeHTML(t.id)}"><div><span class="protocol">${escapeHTML(t.id)}</span><h3>${escapeHTML(t.subject)}</h3><span class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${t.anonymous ? "Identidade restrita ao diretor" : "Manifestação identificada"}</span></div>${badge(t.status)}${t.archived ? '<span class="badge">Arquivada</span>' : ""}</button>`,
+            `<button type="button" class="ticket-card" data-ticket="${escapeHTML(t.id)}"><div><span class="protocol">${escapeHTML(t.id)}</span><h3>${escapeHTML(t.subject)}</h3><span class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${t.anonymous ? "Identidade restrita ao diretor" : "Manifestação identificada"}${user.role === "aluno" && t.identity_accesses?.length ? "<br>Consulta de autoria registrada pela direção" : ""}</span></div>${badge(t.status)}${t.archived ? '<span class="badge">Arquivada</span>' : ""}</button>`,
         )
         .join("")
     : `<div class="empty"><h3>${archiveView ? "Nenhuma manifestação arquivada nesta busca." : "Nenhuma manifestação por aqui."}</h3><p>Ajuste os filtros${staff ? " ou consulte a outra aba" : " ou crie uma nova manifestação"}.</p></div>`;
@@ -1224,6 +1546,22 @@ function showDetail(id) {
     : `Identificado: ${t.identity || ""}`;
   $("detailContent").innerHTML =
     `${badge(t.status)}${t.archived ? ' <span class="badge">Arquivada</span>' : ""}<p class="meta">${escapeHTML(t.kind)} · ${escapeHTML(t.sector)} · ${date(t.created)}<br>${escapeHTML(identity)}</p><p class="detail-body">${escapeHTML(t.body)}</p><h3>Histórico de atendimento</h3>${t.messages.length ? t.messages.map((m) => `<div class="message ${m.author === "Ouvidoria Campo Real" ? "staff" : ""}"><strong>${escapeHTML(m.author)}</strong><span class="meta"> · ${date(m.created)}</span><p>${escapeHTML(m.body)}</p></div>`).join("") : '<p class="form-note">Aguardando atendimento. As respostas aparecerão aqui.</p>'}`;
+  if (
+    (user.role === "aluno" || user.role === "diretor") &&
+    t.identity_accesses?.length
+  ) {
+    const notice = document.createElement("section");
+    notice.className = "identity-notice";
+    notice.innerHTML =
+      "<h3>Consultas da direção à autoria</h3>" +
+      t.identity_accesses
+        .map(
+          (event) =>
+            `<p><strong>${date(event.created)}</strong><br>${escapeHTML(event.reason || "Consulta realizada na versão anterior, sem justificativa registrada.")}</p>`,
+        )
+        .join("");
+    $("detailContent").append(notice);
+  }
   $("detailActions").replaceChildren();
   if (user.role === "aluno") {
     action(t.status === "Resolvida" ? "Pedir nova análise" : "✓ Foi resolvido", () =>
@@ -1239,14 +1577,10 @@ function showDetail(id) {
       action("Resolver e arquivar", () => updateArchive(true));
     }
     if (user.role === "diretor" && t.anonymous)
-      action("Consultar autoria restrita", async () => {
-        const result = await api("/api/identity", {
-          id: activeId,
-        });
-        const note = document.createElement("p");
-        note.className = "form-note";
-        note.textContent = `Autoria: ${result.email}. Consulta registrada${DEMO ? " apenas ilustrativa na demonstração" : " na auditoria do servidor"}.`;
-        $("detailActions").append(note);
+      action("Justificar e consultar autoria", async () => {
+        identityTicketId = activeId;
+        $("identityReasonForm").reset();
+        $("identityReasonDialog").showModal();
       });
   }
   $("replyForm").hidden = user.role !== "aluno" && Boolean(t.archived);
@@ -1311,11 +1645,8 @@ $("loginForm").onsubmit = (event) => {
     if (registerMode && password !== $("confirmPassword").value)
       throw new Error("As senhas precisam ser iguais.");
     if (registerMode) {
-      if (!DEMO)
-        await api("/api/register", {
-          email: email,
-          password: password,
-        });
+      let registration = null;
+      if (!DEMO) registration = await api("/api/register", { email, password });
       resetLogin();
       $("email").focus();
       notify(
@@ -1323,6 +1654,7 @@ $("loginForm").onsubmit = (event) => {
           ? "Cadastro ilustrativo concluído. Digite novamente o e-mail e a senha para explorar."
           : "Conta criada. Digite novamente seu e-mail e sua senha para entrar.",
       );
+      if (registration?.recovery_code) showRecoveryCode(registration.recovery_code);
       return;
     }
     if (DEMO) {
@@ -1349,10 +1681,10 @@ function resetLogin() {
 
 $("toggleRegister").onclick = () => setRegisterMode(!registerMode);
 
-$("forgotPassword").onclick = () =>
-  notify(
-    "Peça ao responsável pela instalação para redefinir sua senha pelo menu python ouvidoria.py --contas.",
-  );
+$("forgotPassword").onclick = () => {
+  $("recoverForm").reset();
+  $("recoverDialog").showModal();
+};
 
 $("newTicket").onclick = () => {
   $("ticketForm").reset();
@@ -1361,14 +1693,32 @@ $("newTicket").onclick = () => {
 
 $("ticketForm").onsubmit = (event) => {
   event.preventDefault();
-  busy(event.submitter, async () => {
-    const payload = Object.fromEntries(new FormData(event.currentTarget));
-    payload.anonymous = $("anonymous").checked;
-    const result = await api("/api/tickets", payload);
+  const payload = Object.fromEntries(new FormData(event.currentTarget));
+  payload.anonymous = $("anonymous").checked;
+  const random = Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) =>
+    value.toString(16).padStart(2, "0"),
+  ).join("");
+  pendingTicket = { ...payload, confirmed: true, submission_id: random };
+  $("confirmTicketSummary").textContent =
+    `${payload.kind} • ${payload.sector}\n${payload.subject}\n\n${payload.body}\n\n${payload.anonymous ? "Identidade restrita ao diretor. Qualquer consulta exigirá justificativa visível para você." : "Manifestação identificada para a equipe de atendimento."}`;
+  $("confirmTicketDialog").showModal();
+};
+$("backToTicket").onclick = () => {
+  pendingTicket = null;
+  $("confirmTicketDialog").close();
+};
+$("confirmTicketForm").onsubmit = (event) => {
+  event.preventDefault();
+  busy($("confirmTicketSubmit"), async () => {
+    if (!pendingTicket)
+      throw new Error("Abra e revise a manifestação antes de confirmar.");
+    const result = await api("/api/tickets", pendingTicket);
+    pendingTicket = null;
+    $("confirmTicketDialog").close();
     $("composeDialog").close();
     await refresh();
     showDetail(result.id);
-    notify("Manifestação registrada. Guarde seu protocolo: " + result.id);
+    notify("Envio confirmado. Manifestação registrada com o protocolo: " + result.id);
   });
 };
 
@@ -1410,6 +1760,92 @@ $("archivedTab").onclick = () => {
 document
   .querySelectorAll("[data-close]")
   .forEach((button) => (button.onclick = () => $(button.dataset.close).close()));
+
+function showRecoveryCode(code) {
+  $("recoveryCodeText").textContent = code;
+  $("savedRecoveryCode").checked = false;
+  $("closeRecoveryCode").disabled = true;
+  $("recoveryCodeDialog").showModal();
+}
+$("savedRecoveryCode").onchange = () => {
+  $("closeRecoveryCode").disabled = !$("savedRecoveryCode").checked;
+};
+$("closeRecoveryCode").onclick = () => {
+  if (!$("savedRecoveryCode").checked) return;
+  $("recoveryCodeDialog").close();
+  $("recoveryCodeText").textContent = "";
+};
+$("recoveryCodeDialog").oncancel = (event) => {
+  if (!$("savedRecoveryCode").checked) {
+    event.preventDefault();
+    notify("Guarde o código e marque a confirmação antes de continuar.");
+  }
+};
+$("recoveryCodeDialog").onclose = () => {
+  $("recoveryCodeText").textContent = "";
+};
+$("recoverForm").onsubmit = (event) => {
+  event.preventDefault();
+  busy($("recoverSubmit"), async () => {
+    if (DEMO)
+      throw new Error(
+        "A recuperação real funciona somente no servidor Python. Esta página é uma demonstração.",
+      );
+    const password = $("recoverPassword").value;
+    if (password !== $("recoverConfirm").value)
+      throw new Error("As novas senhas precisam ser iguais.");
+    const result = await api("/api/recover", {
+      email: $("recoverEmail").value.trim().toLowerCase(),
+      recovery_code: $("recoverCode").value.trim(),
+      password,
+    });
+    $("recoverForm").reset();
+    loggedOut();
+    showRecoveryCode(result.recovery_code);
+    notify("Senha redefinida. Guarde o novo código e entre com sua nova senha.");
+  });
+};
+$("rotateCodeForm").onsubmit = (event) => {
+  event.preventDefault();
+  busy($("rotateCodeSubmit"), async () => {
+    if (DEMO) throw new Error("Códigos reais só podem ser gerados no servidor Python.");
+    const result = await api("/api/recovery-code", {
+      current_password: $("currentPassword").value,
+    });
+    $("rotateCodeForm").reset();
+    $("rotateCodeDialog").close();
+    user.has_recovery_code = true;
+    showRecoveryCode(result.recovery_code);
+  });
+};
+$("identityReasonForm").onsubmit = (event) => {
+  event.preventDefault();
+  busy($("identityReasonSubmit"), async () => {
+    const id = identityTicketId;
+    const result = await api("/api/identity", {
+      id,
+      reason: $("identityReason").value.trim(),
+    });
+    $("identityReasonDialog").close();
+    $("identityReasonForm").reset();
+    await refresh();
+    showDetail(id);
+    const note = document.createElement("p");
+    note.className = "form-note";
+    note.textContent =
+      "Autoria: " +
+      result.email +
+      ". A consulta e a justificativa foram registradas para o aluno.";
+    $("detailActions").append(note);
+  });
+};
+
+$("recoverDialog").onclose = () => $("recoverForm").reset();
+$("rotateCodeDialog").onclose = () => $("rotateCodeForm").reset();
+$("identityReasonDialog").onclose = () => $("identityReasonForm").reset();
+$("confirmTicketDialog").oncancel = () => {
+  pendingTicket = null;
+};
 
 if (DEMO) {
   $("demoBanner").hidden = false;
@@ -1742,15 +2178,15 @@ if (DEMO) {
             <strong>Enviar de forma anônima para o atendimento</strong>
             <small>
               Supervisores não verão seu e-mail. Somente o diretor poderá consultar sua
-              identidade; a consulta ficará registrada. Evite escrever seu nome no
-              relato.
+              identidade; a consulta ficará registrada. Evite escrever seu nome ou
+              e-mail no relato.
             </small>
           </span>
         </label>
         <p class="form-note">
           Você poderá consultar o protocolo e receber respostas mesmo na opção anônima.
         </p>
-        <button class="button primary" type="submit">Enviar manifestação →</button>
+        <button class="button primary" type="submit">Revisar e enviar →</button>
       </form>
     </dialog>
     <dialog id="detailDialog">
@@ -1783,6 +2219,171 @@ if (DEMO) {
         <button class="button primary" type="submit">Enviar mensagem →</button>
       </form>
     </dialog>
+
+    <dialog id="recoverDialog">
+      <div class="dialog-header">
+        <div>
+          <h2>Recuperar minha senha</h2>
+          <p>Use o código privado que você guardou ao criar ou atualizar sua conta.</p>
+        </div>
+        <button
+          class="close"
+          data-close="recoverDialog"
+          type="button"
+          aria-label="Fechar recuperação"
+        >
+          ×
+        </button>
+      </div>
+      <form id="recoverForm">
+        <label for="recoverEmail">E-mail institucional</label>
+        <input
+          id="recoverEmail"
+          type="email"
+          maxlength="254"
+          autocomplete="username"
+          required
+        />
+        <label for="recoverCode">Código de recuperação</label>
+        <input
+          id="recoverCode"
+          type="text"
+          maxlength="120"
+          autocomplete="off"
+          spellcheck="false"
+          required
+        />
+        <label for="recoverPassword">Nova senha</label>
+        <input
+          id="recoverPassword"
+          type="password"
+          minlength="8"
+          maxlength="128"
+          autocomplete="new-password"
+          required
+        />
+        <label for="recoverConfirm">Confirme a nova senha</label>
+        <input
+          id="recoverConfirm"
+          type="password"
+          minlength="8"
+          maxlength="128"
+          autocomplete="new-password"
+          required
+        />
+        <p class="form-note">
+          O código é de uso único. Depois da recuperação, você receberá outro. Sem o
+          código, peça ajuda ao responsável pela instalação; informar apenas o e-mail
+          não permite trocar a senha.
+        </p>
+        <button id="recoverSubmit" class="button primary" type="submit">
+          Redefinir senha
+        </button>
+      </form>
+    </dialog>
+    <dialog id="recoveryCodeDialog" aria-labelledby="recoveryCodeTitle">
+      <h2 id="recoveryCodeTitle">Guarde seu código de recuperação</h2>
+      <p>
+        Este código permite recuperar sua conta sem e-mail de confirmação. Ele será
+        mostrado somente agora. Não compartilhe com outras pessoas.
+      </p>
+      <pre class="private-code" id="recoveryCodeText"></pre>
+      <p class="form-note">
+        Guarde em um gerenciador de senhas ou outro local privado. O sistema armazena
+        apenas a verificação do código, não consegue mostrar o código antigo novamente.
+      </p>
+      <label class="anonymous-option">
+        <input id="savedRecoveryCode" type="checkbox" />
+        <span>Guardei o código em um local seguro.</span>
+      </label>
+      <button id="closeRecoveryCode" class="button primary" type="button" disabled>
+        Continuar
+      </button>
+    </dialog>
+    <dialog id="rotateCodeDialog">
+      <div class="dialog-header">
+        <h2>Código de recuperação</h2>
+        <button
+          class="close"
+          data-close="rotateCodeDialog"
+          type="button"
+          aria-label="Fechar"
+        >
+          ×
+        </button>
+      </div>
+      <form id="rotateCodeForm">
+        <p>
+          Crie um código para sua conta existente ou substitua o anterior. O código
+          antigo deixará de funcionar.
+        </p>
+        <label for="currentPassword">Confirme sua senha atual</label>
+        <input
+          id="currentPassword"
+          type="password"
+          maxlength="128"
+          autocomplete="current-password"
+          required
+        />
+        <button id="rotateCodeSubmit" class="button primary" type="submit">
+          Gerar novo código
+        </button>
+      </form>
+    </dialog>
+    <dialog id="identityReasonDialog">
+      <div class="dialog-header">
+        <h2>Justificar consulta de autoria</h2>
+        <button
+          class="close"
+          data-close="identityReasonDialog"
+          type="button"
+          aria-label="Cancelar consulta"
+        >
+          ×
+        </button>
+      </div>
+      <form id="identityReasonForm">
+        <p>
+          A identidade será exibida somente para a direção. O aluno verá a data e a
+          justificativa desta consulta. A manifestação continua anônima para o
+          supervisor.
+        </p>
+        <label for="identityReason">Por que é necessário consultar a autoria?</label>
+        <textarea
+          id="identityReason"
+          rows="4"
+          minlength="20"
+          maxlength="2000"
+          required
+        ></textarea>
+        <p class="form-note">
+          Use pelo menos 20 caracteres. Evite incluir nomes ou e-mails no texto da
+          justificativa.
+        </p>
+        <button id="identityReasonSubmit" class="button primary" type="submit">
+          Registrar justificativa e consultar
+        </button>
+      </form>
+    </dialog>
+    <dialog id="confirmTicketDialog">
+      <h2>Confirmar envio da manifestação</h2>
+      <div id="confirmTicketSummary" class="detail-body"></div>
+      <p>
+        Confira as informações antes de enviar. Depois da confirmação, seu protocolo
+        será gerado.
+      </p>
+      <form id="confirmTicketForm">
+        <div class="detail-actions">
+          <button id="backToTicket" class="button" type="button">
+            Voltar e revisar
+          </button>
+          <button id="confirmTicketSubmit" class="button primary" type="submit">
+            Confirmar envio
+          </button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   </body>
 </html>
@@ -2660,6 +3261,37 @@ dialog::backdrop {
     width: 100%;
   }
 }
+
+/* As consultas à autoria permanecem visíveis no histórico do titular. */
+.identity-notice {
+  border: 1px solid #d0ae39;
+  border-radius: 8px;
+  background: #fff9e4;
+  padding: 15px;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.identity-notice p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.private-code {
+  user-select: all;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f1f5f8;
+  padding: 16px;
+  border: 1px solid #cddae2;
+  border-radius: 8px;
+  font: 16px monospace;
+}
+#recoveryCodeDialog p,
+#recoverDialog p,
+#rotateCodeDialog p,
+#identityReasonDialog p {
+  font-size: 13px;
+  line-height: 1.7;
+}
 """,
     "configuracao.env.example": r"""# Configuração opcional. O padrão funciona apenas no próprio computador.
 APP_URL=http://localhost:8000
@@ -2676,9 +3308,18 @@ PORT=8000
 
 # O caminho padrão é data/ouvidoria.sqlite3, ao lado do programa.
 # Não altere DATABASE_PATH se quiser continuar usando o mesmo banco.
+
+# A chave é criada fora do banco, em segredos/email.key.
+# Não altere nem apague a chave de uma instalação existente.
+# DATA_KEY_FILE=C:/caminho/protegido/email.key
 """,
 }
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (RuntimeError, InvalidToken) as error:
+        raise SystemExit(
+            "Não foi possível iniciar com segurança: " + str(error)
+        ) from None
