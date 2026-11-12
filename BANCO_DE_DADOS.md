@@ -1,121 +1,154 @@
 # Banco de dados da ouvidoria
 
-O sistema usa SQLite. As tabelas ficam dentro de um único arquivo: `data/ouvidoria.sqlite3`, na pasta do programa. Não há necessidade de instalar um servidor de banco separado. O arquivo `banco.sql` apresenta a estrutura em SQL, com comentários; o programa contém uma cópia desse mesmo esquema para continuar funcionando como arquivo Python independente.
+O sistema usa SQLite, no arquivo `data/ouvidoria.sqlite3`. O esquema legível está em `banco.sql`; o programa contém a mesma definição e aplica migrações para preservar bancos anteriores.
 
-## Como consultar sem expor os relatos
-
-Execute na pasta do projeto:
+## Consultar estrutura e integridade
 
 ```sh
 python ouvidoria.py --banco
 ```
 
-O comando mostra o caminho do banco, o resultado da verificação de integridade e a quantidade de contas, manifestações, mensagens e registros de auditoria. Não imprime e-mails nem conteúdo das manifestações.
+Esse comando mostra o caminho, o resultado de `PRAGMA integrity_check` e contagens. Ele não imprime e-mails, códigos de recuperação ou textos dos relatos.
 
-## Organização
+## Tabelas
 
-| Tabela | Significado | Para que serve |
-| --- | --- | --- |
-| `accounts` | Contas | E-mail, credencial protegida e perfil de acesso. |
-| `tickets` | Manifestações | Protocolo, solicitante, relato, área e andamento. |
-| `messages` | Mensagens | Respostas e complementos de cada protocolo. |
-| `sessions` | Sessões | Acessos temporários depois de um login válido. |
-| `audit` | Auditoria | Consultas de autoria restrita e ações de arquivamento. |
-| `limits` | Limites | Contadores temporários para evitar excesso de tentativas. |
-| `auth_meta` | Controle de atualização | Identifica migrações já realizadas. |
+| Tabela | Conteúdo |
+| --- | --- |
+| `identities` | Identificador opaco e e-mail cifrado. |
+| `accounts` | Conta, perfil e verificadores de senha e recuperação. |
+| `sessions` | Sessões temporárias após login. |
+| `tickets` | Manifestação original, área, andamento e arquivo. |
+| `messages` | Respostas, complementos e eventos do atendimento. |
+| `audit` | Consultas de autoria e ações de arquivamento. |
+| `limits` | Contadores de tentativas por IP e identificador de conta. |
+| `auth_meta` | Migrações realizadas e identificação da chave da instalação. |
 
-Os nomes foram mantidos para preservar a compatibilidade com os bancos existentes. Os rótulos e as explicações abaixo traduzem o papel de cada campo.
+Os nomes antigos das colunas foram preservados para compatibilidade. **A coluna chamada `email`, nas tabelas de relacionamento, agora contém um identificador `id:…`, e não o endereço em texto simples.** Não edite esses identificadores manualmente.
+
+## Identidades e criptografia — identities
+
+| Campo | Significado |
+| --- | --- |
+| `id` | Identificador derivado por HMAC, com chave e separação de finalidade. |
+| `email_cipher` | E-mail protegido por Fernet, com criptografia autenticada. |
+
+A chave é criada automaticamente em `segredos/email.key`, fora do SQLite. `DATA_KEY_FILE` pode definir outro caminho privado. A chave não é uma senha de aluno e não é enviada pelo site. Ela é necessária para descriptografar endereços e verificar os identificadores da instalação.
+
+O banco guarda apenas uma impressão digital da chave, em `auth_meta`, para detectar o uso de uma chave incorreta. Se a chave sumir ou não corresponder ao banco já convertido, o programa recusa iniciar. Não gere outra chave como tentativa de correção: restaure a original.
+
+A proteção atende ao cenário de alguém abrir somente o arquivo SQLite. Quem controlar o computador e ler também a chave poderá descriptografar os endereços. Os identificadores continuam permitindo correlacionar registros; isso não é criptografia de todo o banco nem anonimato contra o administrador da infraestrutura.
 
 ## Contas — accounts
 
 | Campo | Significado |
 | --- | --- |
-| `email` | Identificador único da conta, usado no login. |
-| `salt` | Valor aleatório exclusivo da conta usado no cálculo da senha. |
-| `hash` | Resultado de PBKDF2-HMAC-SHA256, com 600 mil iterações. Não é a senha original. |
-| `role` | Perfil: `aluno`, `supervisor` ou `diretor`. |
-| `created` | Data de criação em segundos desde 01/01/1970, no padrão Unix. |
+| `email` | Referência opaca à identidade. Não contém mais o e-mail legível. |
+| `salt` | Valor aleatório usado na derivação da senha. |
+| `hash` | PBKDF2-HMAC-SHA256, com 600 mil iterações. Não é a senha original. |
+| `role` | Aluno, supervisor ou diretor. Há restrição de um único diretor. |
+| `created` | Data de criação em segundos no padrão Unix. |
+| `recovery_hash` | Verificação HMAC de um código de recuperação de alta entropia; vazio em contas antigas que ainda não geraram o código. |
 
-O banco restringe os valores de perfil e permite apenas um diretor. O cadastro público sempre cria um aluno. Os demais perfis são cadastrados pelo menu local `--contas`. O domínio institucional é validado, mas a titularidade do e-mail não é comprovada.
+O código original é mostrado uma única vez ao cadastrar, gerar/renovar ou recuperar a conta. Ele não é guardado para posterior consulta. Uma recuperação bem-sucedida consome o código, gera outro e encerra todas as sessões anteriores da conta.
+
+Criar conta não cria sessão. O usuário precisa informar novamente e-mail e senha. O cadastro público é sempre de aluno; perfis administrativos são definidos no menu local. O domínio institucional é validado, mas não há comprovação da titularidade da caixa de e-mail.
+
+## Sessões — sessions
+
+`hash` contém o hash do token aleatório enviado ao navegador; `email` referencia a identidade opaca; `expires` define a validade e `csrf` protege alterações autenticadas. As sessões duram oito horas. Logout remove uma sessão; recuperação ou redefinição de senha remove todas as sessões daquela conta.
 
 ## Manifestações — tickets
 
 | Campo | Significado |
 | --- | --- |
-| `id` | Protocolo único, como `CR-2026-…`. |
-| `email` | Conta que registrou a manifestação. É informação restrita em relatos anônimos. |
-| `anonymous` | `1`: autoria restrita ao diretor no atendimento. `0`: relato identificado. |
-| `kind` | Tipo: reclamação, crítica, sugestão, elogio ou solicitação. |
+| `id` | Protocolo único. |
+| `email` | Identificador opaco do solicitante. A relação é consultada pelo servidor. |
+| `anonymous` | 1: autoria restrita à direção no atendimento. 0: manifestação identificada. |
+| `kind` | Reclamação, crítica, sugestão, elogio ou solicitação. |
 | `subject` | Assunto resumido. |
-| `sector` | Área relacionada: infraestrutura, financeiro etc. |
-| `body` | Texto original do relato. |
+| `sector` | Área relacionada. |
+| `body` | Relato original, não criptografado. |
 | `status` | Recebida, Em análise, Respondida ou Resolvida. |
-| `created` | Data de registro, em formato Unix. |
-| `archived` | `1`: arquivada para a equipe. `0`: na fila principal. |
+| `created` | Data de registro no padrão Unix. |
+| `archived` | 1: arquivada para a equipe. 0: na fila principal. |
+| `submission_id` | Identificador aleatório do envio confirmado; pode estar vazio em registros antigos. |
 
-Resolver e arquivar não exclui o registro. O aluno mantém acesso aos próprios protocolos e pode solicitar nova análise. A situação e o arquivamento são atualizados na mesma transação.
+A migração cria um índice único para a combinação de solicitante e `submission_id`, quando este não é nulo. A API exige confirmação e serializa a consulta/gravação para repetir um pedido sem gerar outro protocolo. Se o mesmo identificador vier com conteúdo diferente, a solicitação é recusada.
+
+Arquivar não exclui o registro. Uma nova mensagem ou pedido de análise do aluno retoma o atendimento. Situação, arquivo e histórico são gravados na mesma transação.
 
 ## Mensagens — messages
 
 | Campo | Significado |
 | --- | --- |
-| `id` | Número único da mensagem. |
-| `ticket` | Protocolo ao qual a mensagem pertence. |
-| `author` | Identificação funcional: Aluno, Ouvidoria Campo Real ou Sistema. |
-| `body` | Texto da resposta, complemento ou mudança de andamento. |
-| `created` | Data de envio, em formato Unix. |
+| `id` | Identificador da mensagem. |
+| `ticket` | Protocolo relacionado. |
+| `author` | Papel de quem escreveu: Aluno, Ouvidoria Campo Real ou Sistema. |
+| `body` | Resposta, complemento ou evento de andamento. |
+| `created` | Data no padrão Unix. |
 
-A coluna `ticket` possui chave estrangeira para `tickets.id`. A conexão ativa a verificação dessas chaves com `PRAGMA foreign_keys=ON`.
+A coluna `ticket` tem chave estrangeira para `tickets.id`. Cada conexão ativa `PRAGMA foreign_keys=ON`. Os textos continuam legíveis no SQLite, portanto devem ser tratados como informações sensíveis.
 
-## Sessões — sessions
+## Auditoria e justificativa — audit
 
-`hash` guarda o hash do token aleatório enviado ao navegador; `email` identifica a conta; `expires` define a validade; `csrf` protege alterações autenticadas. As sessões duram oito horas. Logout remove a sessão e redefinição de senha remove os acessos daquela conta.
+| Campo | Significado |
+| --- | --- |
+| `id` | Identificador do evento. |
+| `actor` | Identificador opaco da conta responsável. |
+| `action` | Consulta de autoria, arquivamento ou desarquivamento. |
+| `ticket` | Protocolo envolvido. |
+| `created` | Data da ação no padrão Unix. |
+| `reason` | Justificativa da consulta de autoria; vazio em eventos que não exigem motivo e em consultas de versões antigas. |
 
-**Criar uma conta não cria uma sessão.** Depois do cadastro, os campos são limpos e a pessoa precisa informar e-mail e senha no formulário de entrada.
+O diretor precisa informar justificativa de 20 a 2.000 caracteres antes de consultar autoria. A aplicação confirma a gravação desse evento antes de responder com o e-mail descriptografado. O aluno vê data e motivo em `identity_accesses`, no histórico do próprio protocolo. O supervisor não recebe essa justificativa nem a autoria anônima. A opção `anonymous` permanece ativa.
 
-## Auditoria — audit
-
-`id` identifica o registro; `actor` é a conta que realizou a ação; `action` descreve o que foi feito; `ticket` indica o protocolo; `created` registra a data. A consulta de autoria pelo diretor e o arquivamento/desarquivamento pela equipe deixam esses registros.
-
-A auditoria ajuda a rastrear ações, mas não é imutável: quem administra diretamente o arquivo do banco pode modificá-la.
+Não há envio automático de aviso por e-mail. A informação aparece ao consultar novamente o protocolo ou atualizar a página. A auditoria não é imutável: um administrador com acesso direto ao banco pode alterá-la. Evite registrar nomes ou e-mails no texto da justificativa.
 
 ## Relacionamentos
 
 ```mermaid
 erDiagram
-    accounts ||--o{ tickets : registra
+    identities ||--o| accounts : identifica
+    identities ||--o{ tickets : registra
     accounts ||--o{ sessions : autentica
     tickets ||--o{ messages : possui
-    tickets ||--o{ audit : registra_acoes
+    tickets ||--o{ audit : recebe_eventos
     accounts ||--o{ audit : executa
 ```
 
-O diagrama mostra as relações lógicas do sistema. A chave estrangeira efetivamente declarada no esquema atual é `messages.ticket → tickets.id`. Os demais vínculos são controlados pela aplicação; não são todos impostos por chaves estrangeiras no SQLite. Não altere e-mails ou protocolos diretamente no banco.
+Essas são relações lógicas. A chave estrangeira formal existente é `messages.ticket → tickets.id`. Os demais vínculos são controlados pela aplicação e pelas chaves dos registros. Uma identidade pode existir sem conta, por exemplo para preservar um relato legado até o provisionamento do usuário pelo responsável.
 
-## Integridade e atualizações
+## Integridade e migração
 
-O banco usa chaves primárias, unicidade de e-mail, restrição de um diretor e restrição de valores para perfil e arquivamento. O Python valida os campos, usa consultas parametrizadas e confirma as transações antes de responder com sucesso. A atualização de `initialize()` cria apenas o que falta e registra migrações em `auth_meta`.
+Há chaves primárias, unicidade de conta, restrição de um diretor e valores permitidos para perfil e arquivo. O programa usa consultas parametrizadas, validação dos campos, transações e confirmação da gravação antes de informar sucesso.
 
-Os bancos antigos podem ainda conter uma tabela `codes`, do modelo anterior por e-mail. Os códigos são invalidados na migração e não participam do login atual.
+Na primeira conversão dos e-mails:
 
-Não exclua o arquivo SQLite para atualizar o programa. Com o serviço parado, faça backup e substitua apenas o código. Os relatos e as contas continuam no mesmo arquivo.
+1. Campos novos são acrescentados sem recriar os relatos.
+2. Endereços de contas, manifestações e auditoria passam a identificadores opacos.
+3. Os endereços cifrados ficam em `identities`.
+4. Sessões e contadores antigos são limpos para não manter endereços legíveis.
+5. Códigos do antigo login SMTP são apagados, caso a tabela legada exista.
+6. `secure_delete`, `VACUUM` e checkpoint do WAL concluem a limpeza das páginas antigas.
 
-## Cópias de segurança
+`auth_meta` registra a conclusão e permite retomar uma limpeza interrompida. Pare outras instâncias do serviço antes de atualizar. A migração não altera hashes de senha, protocolos, mensagens nem justificativas históricas. Ela não apaga backups antigos ou cópias exportadas fora do banco; esses arquivos podem continuar contendo endereços e precisam de proteção própria.
+
+## Backup e restauração
 
 ```sh
 python ouvidoria.py --backup
 ```
 
-O comando usa a API de backup do SQLite para produzir uma cópia consistente, mesmo quando outro processo do programa está atendendo requisições. A cópia é salva em `data/backups`, com data, hora e um sufixo aleatório. O comando não envia o arquivo a nenhum serviço externo.
+A API de backup do SQLite produz uma cópia consistente em `data/backups`, mesmo se outra instância estiver atendendo. O nome inclui data, hora e um sufixo aleatório. O comando não envia arquivos a serviços externos.
 
-Esta versão não agenda backups, não apaga cópias antigas automaticamente e não criptografa os arquivos. O responsável deve definir frequência e retenção, copiar os backups para outro local protegido e testar a restauração. Uma cópia no mesmo disco não protege contra perda desse disco.
+Guarde também uma cópia protegida da chave original, separadamente, com acesso restrito. **O backup do banco não inclui a chave.** Sem ela, o programa não poderá descriptografar os endereços nem reconhecer corretamente as identidades.
 
-Para restaurar, pare o serviço, preserve uma cópia do banco atual e coloque o backup escolhido no caminho do banco em uso. Depois, inicie o programa, execute `--banco` e confira os registros e os acessos. Não restaure sobre o arquivo com o serviço em funcionamento.
+Não há agendamento, retenção automática, backup externo automático ou criptografia integral do arquivo. Os e-mails permanecem cifrados na cópia, mas relatos e justificativas continuam sensíveis. Copie os backups para outro local protegido e teste a recuperação.
 
-## Informações sensíveis
+Para restaurar, pare o serviço, preserve uma cópia do estado atual e restaure o banco e a chave correspondentes. Inicie o programa, execute `--banco` e confira os acessos. Não substitua arquivos de banco com o serviço em execução.
 
-E-mails, relatos, mensagens e auditoria não estão criptografados no arquivo SQLite. A aplicação restringe a autoria anônima, mas administradores do computador ou pessoas com acesso direto ao banco podem lê-la. Os backups contêm essas mesmas informações.
+## Proteção da infraestrutura
 
-As permissões de pasta e arquivo tentam restringir o acesso ao usuário do servidor nos sistemas que suportam essas permissões. No Windows, é necessário configurar também as permissões NTFS; `chmod` não substitui esse controle. Nunca envie `data`, backups ou o `.env` preenchido ao GitHub.
+Nunca envie `data`, backups, `.env` preenchido ou `segredos` ao GitHub. No Windows, configure permissões NTFS: os comandos `chmod` do programa não substituem esse controle. Evite guardar banco e chave juntos em pastas compartilhadas ou sincronizadas sem controle de acesso; `DATA_KEY_FILE` permite separar a chave.
 
-Para uso institucional, configure HTTPS, acesso administrativo restrito, retenção de dados, descarte e cópias protegidas. Anonimato aqui significa restrição de autoria na aplicação, não anonimato absoluto.
+Para uso institucional, configure HTTPS, administração restrita, retenção, descarte e políticas compatíveis com o tratamento de dados pessoais. A criptografia dos campos de e-mail não remove nomes ou endereços que alguém tenha digitado nos relatos, respostas ou justificativas.
