@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import secrets
 import sys
 import tempfile
 import threading
@@ -17,6 +18,7 @@ class SecurityTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
         server.DB = Path(cls.temp.name) / "data" / "test.sqlite3"
+        server.KEY_PATH = Path(cls.temp.name) / "segredos" / "email.key"
         server.DIRECTOR = "diretor@camporeal.edu.br"
         server.SUPERVISORS = {"supervisor@camporeal.edu.br"}
         server.initialize()
@@ -41,6 +43,17 @@ class SecurityTests(unittest.TestCase):
         cls.temp.cleanup()
 
     def request(self, path, data=None, session=None, origin=None, csrf=True, host=None):
+        if data is not None and path == "/api/tickets":
+            data = {
+                **data,
+                "confirmed": True,
+                "submission_id": "test-" + secrets.token_hex(12),
+            }
+        if data is not None and path == "/api/identity" and "reason" not in data:
+            data = {
+                **data,
+                "reason": "Consulta necessária para encaminhar corretamente o atendimento.",
+            }
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         headers = {
             "Content-Type": "application/json",
@@ -73,7 +86,7 @@ class SecurityTests(unittest.TestCase):
     def login(self, email):
         with server.database() as db:
             exists = db.execute(
-                "SELECT 1 FROM accounts WHERE email=?", (email,)
+                "SELECT 1 FROM accounts WHERE email=?", (server.account_id(email),)
             ).fetchone()
         payload = {"email": email, "password": "SenhaTeste123!"}
         if not exists:
@@ -255,14 +268,16 @@ class SecurityTests(unittest.TestCase):
         account = self.login("expirado@camporeal.edu.br")
         with server.database() as db:
             saved = db.execute(
-                "SELECT * FROM accounts WHERE email=?", (account["email"],)
+                "SELECT * FROM accounts WHERE email=?",
+                (server.account_id(account["email"]),),
             ).fetchone()
             self.assertNotEqual(saved["hash"], "SenhaTeste123!")
             self.assertEqual(
                 saved["hash"], server.password_hash("SenhaTeste123!", saved["salt"])
             )
             db.execute(
-                "UPDATE sessions SET expires=0 WHERE email=?", (account["email"],)
+                "UPDATE sessions SET expires=0 WHERE email=?",
+                (server.account_id(account["email"]),),
             )
         self.assertEqual(self.request("/api/me", session=account)[0], 401)
         self.assertEqual(
@@ -279,7 +294,7 @@ class SecurityTests(unittest.TestCase):
                 "INSERT INTO tickets(id,email,anonymous,kind,subject,sector,body,status,created) VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     "CR-HISTORICO",
-                    email,
+                    server.ensure_identity(db, email),
                     1,
                     "Crítica",
                     "Registro anterior",
