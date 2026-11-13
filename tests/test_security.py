@@ -79,6 +79,8 @@ class SecurityFeaturesTests(unittest.TestCase):
 
     def register(self, label):
         email = label + "@camporeal.edu.br"
+        with app.database() as db:
+            app.authorize_student(db, email)
         status, result, cookie = self.request(
             "/api/register", {"email": email, "password": "SenhaTeste123!"}
         )
