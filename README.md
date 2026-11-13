@@ -15,15 +15,38 @@ No Windows, você pode substituir `python` por `py -3`. Abra **http://localhost:
 
 Se baixar apenas `ouvidoria.py`, instale a dependência com `python -m pip install cryptography`. A cópia `ouvidoria-python.txt` contém o mesmo programa e pode ser renomeada para `.py`.
 
+## Autorizar o e-mail antes do aluno criar conta
+
+O cadastro pelo site só funciona para e-mails liberados previamente pelo responsável. A autorização cria apenas o registro de permissão: não cria uma conta, não define senha e não cria uma caixa de e-mail na faculdade.
+
+No terminal do VS Code, na pasta do projeto, execute:
+
+```powershell
+python .\ouvidoria.py --contas
+```
+
+1. Escolha **4 — Autorizar e-mail de aluno (sem senha)**.
+2. Digite o e-mail institucional que poderá criar conta.
+3. Repita a operação para os demais alunos, se necessário.
+4. Escolha **0 — Sair** e inicie o servidor normalmente, ou com `--rede-local` para testes pelo celular.
+
+O aluno então acessa **Primeiro acesso? Criar conta de aluno**, informa exatamente o endereço liberado e escolhe a própria senha. Um endereço com domínio correto, mas que não esteja autorizado, também será recusado. A conferência é feita no servidor, não apenas no formulário.
+
+Use **5 — Listar e-mails autorizados** para ver quem ainda aguarda cadastro e quem já criou a conta. A opção **6 — Cancelar autorização pendente** retira uma liberação que ainda não foi usada; ela não exclui nem bloqueia contas existentes. Autorizar o mesmo endereço pendente novamente não duplica o registro.
+
+A **opção 1** continua criando uma conta já com senha e perfil, sendo indicada para a equipe ou provisionamento direto. Para deixar o aluno definir a própria senha pelo site, use a **opção 4**.
+
+Contas já cadastradas continuam funcionando e não precisam de nova liberação. Não há importação de uma lista real da faculdade: este é um controle manual do protótipo. A autorização prévia também não comprova que a pessoa que digitou o endereço é dona da caixa de e-mail; para implantação real, esse vínculo precisaria ser verificado por integração institucional ou confirmação apropriada.
+
 ## Criar conta e entrar
 
-1. Clique em **Primeiro acesso? Criar conta de aluno**.
+1. Peça ao responsável para liberar seu endereço e clique em **Primeiro acesso? Criar conta de aluno**.
 2. Informe seu e-mail `@camporeal.edu.br` e uma senha de 8 a 128 caracteres. Confirme a senha.
 3. Guarde o **código de recuperação** exibido uma única vez. Ele não é enviado por e-mail.
 4. Marque que guardou o código para fechar a janela.
 5. Digite novamente e-mail e senha e clique em **Entrar**. O cadastro não cria uma sessão automaticamente.
 
-O campo de e-mail começa vazio. O cadastro público cria somente alunos; ele não oferece escolha de perfil administrativo. O domínio é validado, mas a titularidade do endereço não é comprovada. O código de recuperação comprova a posse do segredo da conta, não a propriedade de uma caixa de e-mail.
+O campo de e-mail começa vazio. O cadastro público cria somente alunos previamente autorizados; ele não oferece escolha de perfil administrativo. O domínio é validado, mas a titularidade do endereço não é comprovada. O código de recuperação comprova a posse do segredo da conta, não a propriedade de uma caixa de e-mail.
 
 ## Esqueci minha senha
 
@@ -51,7 +74,7 @@ No computador responsável pela instalação, execute:
 python ouvidoria.py --contas
 ```
 
-O menu permite criar contas de aluno, supervisor e diretor, redefinir senhas e listar contas. A senha não aparece enquanto é digitada. O banco permite apenas um diretor.
+O menu permite criar contas de aluno, supervisor e diretor, redefinir senhas, listar contas e autorizar, listar ou cancelar liberações pendentes de alunos. A senha não aparece enquanto é digitada. O banco permite apenas um diretor.
 
 Ao criar uma conta ou redefinir uma senha pelo menu, o programa mostra um novo código de recuperação uma única vez. Entregue esse código somente ao titular da conta. Uma redefinição também invalida sessões e o código de recuperação anteriores.
 
@@ -107,7 +130,7 @@ Se o banco já está cifrado e a chave estiver ausente ou diferente, o programa 
 
 Backups, cópias exportadas e arquivos antigos criados antes da migração podem continuar contendo e-mails legíveis. A atualização não apaga esses arquivos pessoais. Eles devem ser protegidos e tratados conforme a política de retenção.
 
-As contas da versão anterior continuam usando as mesmas senhas. Elas podem gerar seu código de recuperação depois de entrar. E-mails com relatos da versão antiga, mas sem conta cadastrada, continuam reservados ao provisionamento pelo menu local.
+As contas da versão anterior continuam usando as mesmas senhas. Elas podem gerar seu código de recuperação depois de entrar. Para e-mails com relatos antigos e sem conta, o responsável pode provisionar a conta pela opção 1 ou autorizar o cadastro pela opção 4 após conferir o titular correto. O cadastro público continua bloqueado sem essa autorização.
 
 ## PC e celular na mesma rede
 
@@ -139,7 +162,7 @@ Não há agendamento, retenção automática nem cópia externa automática. Def
 
 ## Demonstração e organização
 
-Abra `DEMONSTRACAO.html` para apresentar as telas com dados fictícios. Ela ilustra a revisão do envio e a consulta justificada, mas não representa a segurança do servidor. Recuperação de senha e códigos reais funcionam apenas no programa Python.
+Abra `DEMONSTRACAO.html` para apresentar as telas com dados fictícios. Ela ilustra a revisão do envio e a consulta justificada, mas não representa a segurança do servidor. Recuperação de senha, códigos reais e autorizações do terminal funcionam apenas no programa Python. No formulário de cadastro da demonstração, use o endereço fictício autorizado `aluno.exemplo@camporeal.edu.br`.
 
 O servidor e as funções do banco vêm primeiro em `ouvidoria.py`. O SQL e os conteúdos HTML, CSS e JavaScript estão ao final, sem duplicação das telas na demonstração. O `.env` é opcional para os testes locais; gere o modelo com `--configurar` se precisar ajustar o endereço.
 
@@ -158,4 +181,4 @@ node tests/test_frontend.cjs
 node tests/test_security_frontend.cjs
 ```
 
-Os testes usam bancos temporários e verificam recuperação de uso único, revogação de sessões, ausência de e-mails estruturados e códigos legíveis no SQLite, chave ausente/incorreta, migração, justificativa obrigatória e visível ao titular, confirmação de envio, repetição sem duplicidade, permissões, CSRF, arquivamento e acesso local. As telas ainda devem ser conferidas nos dispositivos reais antes da publicação institucional.
+Os testes usam bancos temporários e verificam autorização prévia pelo terminal, bloqueio de e-mails não liberados, consumo único da autorização, cancelamento pendente, preservação de contas existentes, recuperação de uso único, revogação de sessões, ausência de e-mails estruturados e códigos legíveis no SQLite, chave ausente/incorreta, migração, justificativa obrigatória e visível ao titular, confirmação de envio, repetição sem duplicidade, permissões, CSRF, arquivamento e acesso local. As telas ainda devem ser conferidas nos dispositivos reais antes da publicação institucional.
