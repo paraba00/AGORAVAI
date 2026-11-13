@@ -325,6 +325,55 @@ def check_password(password):
         )
 
 
+def authorize_student(db, email):
+    """Libera um endereço para autocadastro. Essa operação não cria conta nem senha."""
+    email = email.strip().lower()
+    if not INSTITUTIONAL.fullmatch(email):
+        raise ValueError("Use um e-mail @camporeal.edu.br.")
+    if email == DIRECTOR or email in SUPERVISORS:
+        raise ValueError(
+            "Este endereço está reservado à equipe. Crie a conta administrativa pela opção 1."
+        )
+    identifier = account_id(email)
+    if db.execute("SELECT 1 FROM accounts WHERE email=?", (identifier,)).fetchone():
+        raise ValueError(
+            "Já existe uma conta para este e-mail. O titular deve entrar ou recuperar a senha."
+        )
+    existing = db.execute(
+        "SELECT activated_at FROM student_authorizations WHERE email=?", (identifier,)
+    ).fetchone()
+    if existing:
+        if existing["activated_at"] is not None:
+            raise ValueError(
+                "Esta autorização já foi utilizada. Confira a conta existente antes de alterar os dados."
+            )
+        return False
+    ensure_identity(db, email)
+    db.execute(
+        "INSERT INTO student_authorizations(email,authorized_at,activated_at) VALUES (?,?,NULL)",
+        (identifier, time.time()),
+    )
+    return True
+
+
+def cancel_student_authorization(db, email):
+    """Retira apenas uma liberação ainda não usada; não exclui nem bloqueia contas."""
+    email = email.strip().lower()
+    if not INSTITUTIONAL.fullmatch(email):
+        raise ValueError("Use um e-mail @camporeal.edu.br.")
+    identifier = account_id(email)
+    if db.execute("SELECT 1 FROM accounts WHERE email=?", (identifier,)).fetchone():
+        raise ValueError(
+            "A conta já foi criada. Esta opção cancela somente autorizações pendentes."
+        )
+    return bool(
+        db.execute(
+            "DELETE FROM student_authorizations WHERE email=? AND activated_at IS NULL",
+            (identifier,),
+        ).rowcount
+    )
+
+
 def insert_account(db, email, password, profile):
     """Cria a conta sem guardar o e-mail ou o código de recuperação em texto simples."""
     email = email.strip().lower()
@@ -340,6 +389,10 @@ def insert_account(db, email, password, profile):
     db.execute(
         "INSERT INTO accounts(email,salt,hash,role,created) VALUES (?,?,?,?,?)",
         (identifier, salt, password_hash(password, salt), profile, time.time()),
+    )
+    db.execute(
+        "UPDATE student_authorizations SET activated_at=? WHERE email=? AND activated_at IS NULL",
+        (time.time(), identifier),
     )
     return rotate_recovery(db, identifier)
 
@@ -360,7 +413,7 @@ def manage_accounts():
     initialize()
     while True:
         print(
-            "\nCONTAS DA OUVIDORIA\n1 - Criar conta\n2 - Redefinir senha\n3 - Listar contas\n0 - Sair"
+            "\nCONTAS DA OUVIDORIA\n1 - Criar conta com senha (equipe ou aluno)\n2 - Redefinir senha\n3 - Listar contas\n4 - Autorizar e-mail de aluno (sem senha)\n5 - Listar e-mails autorizados\n6 - Cancelar autorização pendente\n0 - Sair"
         )
         option = input("Escolha: ").strip()
         if option == "0":
@@ -372,6 +425,45 @@ def manage_accounts():
                         "SELECT email,role FROM accounts ORDER BY role,email"
                     ):
                         print(row["role"] + ": " + email_for(row["email"], db))
+                continue
+            if option == "5":
+                with database() as db:
+                    rows = db.execute(
+                        "SELECT email,activated_at FROM student_authorizations ORDER BY authorized_at,email"
+                    ).fetchall()
+                    if not rows:
+                        print("Nenhum e-mail foi autorizado pelo menu ainda.")
+                    for row in rows:
+                        status = (
+                            "Conta criada"
+                            if row["activated_at"] is not None
+                            else "Aguardando cadastro no site"
+                        )
+                        print(email_for(row["email"], db) + " — " + status)
+                continue
+            if option in ("4", "6"):
+                email = input("E-mail institucional do aluno: ").strip().lower()
+                with database() as db:
+                    changed = (
+                        authorize_student(db, email)
+                        if option == "4"
+                        else cancel_student_authorization(db, email)
+                    )
+                if option == "4":
+                    print(
+                        "E-mail autorizado."
+                        if changed
+                        else "Este e-mail já estava autorizado."
+                    )
+                    print(
+                        "O aluno pode criar a conta no site e escolher a própria senha. Nenhuma conta foi criada por esta opção."
+                    )
+                else:
+                    print(
+                        "Autorização pendente cancelada."
+                        if changed
+                        else "Nenhuma autorização pendente foi encontrada."
+                    )
                 continue
             if option not in ("1", "2"):
                 print("Escolha uma das opções do menu.")
@@ -666,18 +758,22 @@ class Handler(BaseHTTPRequestHandler):
                         exists = db.execute(
                             "SELECT 1 FROM accounts WHERE email=?", (identifier,)
                         ).fetchone()
-                        legacy = db.execute(
-                            "SELECT 1 FROM tickets WHERE email=? LIMIT 1", (identifier,)
-                        ).fetchone()
-                        if (
-                            exists
-                            or legacy
-                            or email == DIRECTOR
-                            or email in SUPERVISORS
-                        ):
+                        if exists or email == DIRECTOR or email in SUPERVISORS:
                             raise Error(
                                 409,
-                                "Conta existente ou reservada. Entre com sua senha ou peça ao responsável para criar ou recuperar a conta.",
+                                "Conta existente ou reservada. Entre com sua senha ou peça ajuda ao responsável.",
+                            )
+                        authorization = db.execute(
+                            "SELECT activated_at FROM student_authorizations WHERE email=?",
+                            (identifier,),
+                        ).fetchone()
+                        if (
+                            not authorization
+                            or authorization["activated_at"] is not None
+                        ):
+                            raise Error(
+                                403,
+                                "Este e-mail ainda não foi autorizado para cadastro. Solicite a liberação ao responsável pela ouvidoria.",
                             )
                         recovery = insert_account(db, email, password, "aluno")
                         return self.success(
@@ -1109,6 +1205,13 @@ CREATE TABLE IF NOT EXISTS identities (
 );
 
 -- Contas e permissões. email contém o identificador opaco de identities.
+-- Liberações feitas pelo responsável no terminal; email também é identificador opaco.
+CREATE TABLE IF NOT EXISTS student_authorizations (
+    email TEXT PRIMARY KEY REFERENCES identities(id),
+    authorized_at REAL NOT NULL,
+    activated_at REAL
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
     email   TEXT PRIMARY KEY,
     salt    TEXT NOT NULL,
@@ -1645,6 +1748,10 @@ $("loginForm").onsubmit = (event) => {
     if (registerMode && password !== $("confirmPassword").value)
       throw new Error("As senhas precisam ser iguais.");
     if (registerMode) {
+      if (DEMO && email !== demoEmails.aluno)
+        throw new Error(
+          "Nesta demonstração, use aluno.exemplo@camporeal.edu.br como e-mail fictício autorizado.",
+        );
       let registration = null;
       if (!DEMO) registration = await api("/api/register", { email, password });
       resetLogin();
@@ -1966,8 +2073,8 @@ if (DEMO) {
           <span class="step-label">SEU ESPAÇO DE ESCUTA</span>
           <h2>Vamos conversar?</h2>
           <p>
-            Entre com seu e-mail institucional e senha. Se ainda não tem conta,
-            cadastre-se e depois faça o login.
+            Entre com seu e-mail institucional e senha. Se ainda não tem conta, solicite
+            a liberação do seu e-mail, cadastre-se e depois faça o login.
           </p>
           <form id="loginForm">
             <label for="email">E-mail institucional</label>
@@ -2007,8 +2114,8 @@ if (DEMO) {
               Esqueci minha senha
             </button>
             <p id="authHint" class="form-note">
-              Use seu e-mail @camporeal.edu.br. O cadastro verifica o domínio, mas não
-              comprova a titularidade do e-mail.
+              O cadastro exige e-mail @camporeal.edu.br autorizado previamente pelo
+              responsável. A autorização não comprova a titularidade do e-mail.
             </p>
           </form>
           <div id="demoAccounts" class="demo-accounts" hidden>
