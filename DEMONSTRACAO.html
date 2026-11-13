@@ -967,8 +967,8 @@ dialog::backdrop {
           <span class="step-label">SEU ESPAÇO DE ESCUTA</span>
           <h2>Vamos conversar?</h2>
           <p>
-            Entre com seu e-mail institucional e senha. Se ainda não tem conta,
-            cadastre-se e depois faça o login.
+            Entre com seu e-mail institucional e senha. Se ainda não tem conta, solicite
+            a liberação do seu e-mail, cadastre-se e depois faça o login.
           </p>
           <form id="loginForm">
             <label for="email">E-mail institucional</label>
@@ -1008,8 +1008,8 @@ dialog::backdrop {
               Esqueci minha senha
             </button>
             <p id="authHint" class="form-note">
-              Use seu e-mail @camporeal.edu.br. O cadastro verifica o domínio, mas não
-              comprova a titularidade do e-mail.
+              O cadastro exige e-mail @camporeal.edu.br autorizado previamente pelo
+              responsável. A autorização não comprova a titularidade do e-mail.
             </p>
           </form>
           <div id="demoAccounts" class="demo-accounts" hidden>
@@ -1849,6 +1849,10 @@ $("loginForm").onsubmit = (event) => {
     if (registerMode && password !== $("confirmPassword").value)
       throw new Error("As senhas precisam ser iguais.");
     if (registerMode) {
+      if (DEMO && email !== demoEmails.aluno)
+        throw new Error(
+          "Nesta demonstração, use aluno.exemplo@camporeal.edu.br como e-mail fictício autorizado.",
+        );
       let registration = null;
       if (!DEMO) registration = await api("/api/register", { email, password });
       resetLogin();
