@@ -8,6 +8,13 @@ CREATE TABLE IF NOT EXISTS identities (
 );
 
 -- Contas e permissões. email contém o identificador opaco de identities.
+-- Liberações feitas pelo responsável no terminal; email também é identificador opaco.
+CREATE TABLE IF NOT EXISTS student_authorizations (
+    email TEXT PRIMARY KEY REFERENCES identities(id),
+    authorized_at REAL NOT NULL,
+    activated_at REAL
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
     email   TEXT PRIMARY KEY,
     salt    TEXT NOT NULL,
