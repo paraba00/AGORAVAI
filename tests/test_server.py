@@ -90,6 +90,8 @@ class SecurityTests(unittest.TestCase):
             ).fetchone()
         payload = {"email": email, "password": "SenhaTeste123!"}
         if not exists:
+            with server.database() as db:
+                server.authorize_student(db, email)
             status, _, cookie = self.request("/api/register", payload)
             self.assertEqual(status, 201)
             self.assertEqual(cookie, "")
@@ -102,6 +104,8 @@ class SecurityTests(unittest.TestCase):
         return {**profile, "cookie": cookie}
 
     def test_01_authentication_and_domain(self):
+        with server.database() as db:
+            server.authorize_student(db, "novo@camporeal.edu.br")
         self.assertEqual(self.request("/api/tickets")[0], 401)
         for email in [
             "pessoa@gmail.com",
@@ -308,7 +312,7 @@ class SecurityTests(unittest.TestCase):
             self.request(
                 "/api/register", {"email": email, "password": "SenhaTeste123!"}
             )[0],
-            409,
+            403,
         )
         with server.database() as db:
             server.insert_account(db, email, "SenhaTeste123!", "aluno")
@@ -413,6 +417,7 @@ class SecurityTests(unittest.TestCase):
     def test_06_register_requires_a_separate_login(self):
         email = "cadastro-sem-login@camporeal.edu.br"
         with server.database() as db:
+            server.authorize_student(db, email)
             before = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
         status, result, cookie = self.request(
             "/api/register", {"email": email, "password": "SenhaTeste123!"}
