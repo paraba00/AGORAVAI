@@ -16,6 +16,7 @@ Esse comando mostra o caminho, o resultado de `PRAGMA integrity_check` e contage
 | --- | --- |
 | `identities` | Identificador opaco e e-mail cifrado. |
 | `accounts` | Conta, perfil e verificadores de senha e recuperação. |
+| `student_authorizations` | E-mails previamente liberados para cadastro pelo site. |
 | `sessions` | Sessões temporárias após login. |
 | `tickets` | Manifestação original, área, andamento e arquivo. |
 | `messages` | Respostas, complementos e eventos do atendimento. |
@@ -38,6 +39,20 @@ O banco guarda apenas uma impressão digital da chave, em `auth_meta`, para dete
 
 A proteção atende ao cenário de alguém abrir somente o arquivo SQLite. Quem controlar o computador e ler também a chave poderá descriptografar os endereços. Os identificadores continuam permitindo correlacionar registros; isso não é criptografia de todo o banco nem anonimato contra o administrador da infraestrutura.
 
+## Autorizações de alunos — student_authorizations
+
+| Campo | Significado |
+| --- | --- |
+| `email` | Identificador opaco da identidade autorizada. Possui chave estrangeira para `identities.id`. |
+| `authorized_at` | Data da liberação pelo responsável, no padrão Unix. |
+| `activated_at` | Data em que a autorização foi usada para criar uma conta; vazio enquanto está pendente. |
+
+O menu local `--contas`, opção 4, grava a identidade cifrada e a autorização, sem criar senha ou conta. No cadastro do site, o servidor exige essa autorização pendente e, na mesma transação, cria a conta de aluno e marca a utilização. Uma autorização não permite sobrescrever uma conta ou escolher perfil administrativo.
+
+A opção 5 lista o andamento; a opção 6 remove apenas a autorização ainda não utilizada. A identidade cifrada pode continuar no banco por estar ligada a outros registros. A opção de cancelamento não apaga contas nem manifestações. A tabela é criada de forma aditiva nas instalações antigas e não muda os acessos já existentes.
+
+Não há rota pública para autorizar endereços. Os e-mails são liberados no terminal da instalação. A lista não comprova a titularidade da caixa postal, pois não envia verificação ao e-mail.
+
 ## Contas — accounts
 
 | Campo | Significado |
@@ -51,7 +66,7 @@ A proteção atende ao cenário de alguém abrir somente o arquivo SQLite. Quem 
 
 O código original é mostrado uma única vez ao cadastrar, gerar/renovar ou recuperar a conta. Ele não é guardado para posterior consulta. Uma recuperação bem-sucedida consome o código, gera outro e encerra todas as sessões anteriores da conta.
 
-Criar conta não cria sessão. O usuário precisa informar novamente e-mail e senha. O cadastro público é sempre de aluno; perfis administrativos são definidos no menu local. O domínio institucional é validado, mas não há comprovação da titularidade da caixa de e-mail.
+Criar conta não cria sessão. O usuário precisa informar novamente e-mail e senha. O cadastro público exige autorização pendente e é sempre de aluno; perfis administrativos são definidos no menu local. O domínio institucional é validado, mas não há comprovação da titularidade da caixa de e-mail.
 
 ## Sessões — sessions
 
@@ -109,6 +124,7 @@ Não há envio automático de aviso por e-mail. A informação aparece ao consul
 ```mermaid
 erDiagram
     identities ||--o| accounts : identifica
+    identities ||--o| student_authorizations : permite_cadastro
     identities ||--o{ tickets : registra
     accounts ||--o{ sessions : autentica
     tickets ||--o{ messages : possui
@@ -116,7 +132,7 @@ erDiagram
     accounts ||--o{ audit : executa
 ```
 
-Essas são relações lógicas. A chave estrangeira formal existente é `messages.ticket → tickets.id`. Os demais vínculos são controlados pela aplicação e pelas chaves dos registros. Uma identidade pode existir sem conta, por exemplo para preservar um relato legado até o provisionamento do usuário pelo responsável.
+Essas são relações lógicas. As chaves estrangeiras formais são `messages.ticket → tickets.id` e `student_authorizations.email → identities.id`. Os demais vínculos são controlados pela aplicação e pelas chaves dos registros. Uma identidade pode existir sem conta, por exemplo para manter uma autorização pendente ou preservar um relato legado até o provisionamento do usuário pelo responsável.
 
 ## Integridade e migração
 
