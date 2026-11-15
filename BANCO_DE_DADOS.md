@@ -149,6 +149,34 @@ Na primeira conversão dos e-mails:
 
 `auth_meta` registra a conclusão e permite retomar uma limpeza interrompida. Pare outras instâncias do serviço antes de atualizar. A migração não altera hashes de senha, protocolos, mensagens nem justificativas históricas. Ela não apaga backups antigos ou cópias exportadas fora do banco; esses arquivos podem continuar contendo endereços e precisam de proteção própria.
 
+## E-mails ainda legíveis ou IDs abreviados no DB Browser
+
+Se `accounts.email` ou `tickets.email` ainda mostrarem endereços, confira se o programa e o DB Browser estão usando a mesma pasta. Uma cópia em Downloads não converte automaticamente o banco de outra cópia na Área de Trabalho.
+
+1. Pare o servidor e feche o banco no DB Browser.
+2. Faça uma cópia privada de `data` e `segredos`, caso essa pasta já exista.
+3. Coloque o `ouvidoria.py` atualizado na mesma pasta da instalação que contém o banco desejado. Preserve o `.env` e confira `DATABASE_PATH` se essa opção estiver configurada.
+4. Instale `cryptography`, se necessário, e execute:
+
+```powershell
+python -m pip install cryptography
+python .\ouvidoria.py --criptografar
+```
+
+O comando exige que o banco já exista: não cria um arquivo vazio em uma pasta errada. Ele mostra o caminho absoluto do banco convertido/verificado, conta endereços legíveis nos campos estruturados e verifica a correspondência das identidades cifradas, sem imprimir os endereços. Use esse caminho para reabrir o arquivo no DB Browser.
+
+Em `accounts.email` e `tickets.email`, o formato esperado é `id:` seguido por 64 caracteres hexadecimais, totalizando **67 caracteres**. O e-mail cifrado fica em `identities.email_cipher`. O DB Browser não apresenta o e-mail descriptografado automaticamente.
+
+Se a tela mostra apenas `id:...`, consulte na aba Executar SQL:
+
+```sql
+SELECT email, length(email) AS tamanho FROM accounts;
+```
+
+Com tamanho 67, confira a célula completa no editor de dados e a largura da coluna. Um valor de apenas 4 ou 6 caracteres pode ser uma reticência gravada como texto, não um identificador completo. Não substitua IDs por exemplos como `id:...`, nem edite vínculos manualmente: preserve banco e chave e confira os registros antes de tentar corrigir.
+
+A atualização também detecta endereços legíveis gravados novamente por uma versão antiga e repete a conversão com a chave original. Não mantenha versões antigas e novas gravando simultaneamente no mesmo banco. Se houver contas duplicadas que colidam na conversão, o programa interrompe a transação em vez de mesclar credenciais automaticamente.
+
 ## Backup e restauração
 
 ```sh
