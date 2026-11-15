@@ -188,6 +188,87 @@ class AccountTests(unittest.TestCase):
             (Path(app.__file__).parent / "banco.sql").read_text().strip(),
         )
 
+    def test_explicit_encryption_command_reports_the_exact_file_without_addresses(self):
+        address = "relatorio@camporeal.edu.br"
+        with app.database() as db:
+            app.insert_account(db, address, "SenhaTeste123!", "aluno")
+        with patch("sys.argv", ["ouvidoria.py", "--criptografar"]), patch(
+            "builtins.print"
+        ) as output:
+            app.main()
+        text = "\n".join(str(call) for call in output.call_args_list)
+        self.assertIn(str(app.DB.resolve()), text)
+        self.assertIn("Proteção de e-mails verificada", text)
+        self.assertNotIn(address, text)
+
+    def test_explicit_encryption_does_not_create_a_database_at_a_wrong_path(self):
+        missing = Path(self.temp.name) / "pasta-errada" / "ouvidoria.sqlite3"
+        with patch.object(app, "DB", missing), patch(
+            "sys.argv", ["ouvidoria.py", "--criptografar"]
+        ):
+            with self.assertRaises(SystemExit):
+                app.main()
+        self.assertFalse(missing.exists())
+
+    def test_new_plaintext_reference_is_converted_with_the_existing_key(self):
+        address = "referencia-antiga@camporeal.edu.br"
+        with app.database() as db:
+            app.insert_account(db, address, "SenhaTeste123!", "aluno")
+            db.execute(
+                "INSERT INTO tickets(id,email,anonymous,kind,subject,sector,body,status,created) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    "CR-REPARAR",
+                    address,
+                    1,
+                    "Crítica",
+                    "Relato anterior",
+                    "Geral",
+                    "Registro de uma versão anterior.",
+                    "Recebida",
+                    1,
+                ),
+            )
+            db.execute(
+                "INSERT INTO sessions VALUES (?,?,?,?)",
+                ("antiga", address, 9999999999, "csrf"),
+            )
+        key = app.KEY_PATH.read_bytes()
+        app.initialize()
+        self.assertEqual(app.KEY_PATH.read_bytes(), key)
+        with app.database() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT email FROM tickets WHERE id='CR-REPARAR'"
+                ).fetchone()[0],
+                app.account_id(address),
+            )
+            self.assertFalse(any(app.structured_plaintext_counts(db).values()))
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0
+            )
+        self.assertNotIn(address.encode(), app.DB.read_bytes())
+
+    def test_duplicate_account_is_not_merged_during_repair(self):
+        address = "duplicado@camporeal.edu.br"
+        with app.database() as db:
+            app.insert_account(db, address, "SenhaTeste123!", "aluno")
+            db.execute(
+                "INSERT INTO accounts(email,salt,hash,role,created) VALUES (?,?,?,?,?)",
+                (address, "0" * 32, "hash-antigo", "aluno", 1),
+            )
+        with self.assertRaises(RuntimeError):
+            app.initialize()
+        with app.database() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], 2
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT hash FROM accounts WHERE email=?", (address,)
+                ).fetchone()[0],
+                "hash-antigo",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
