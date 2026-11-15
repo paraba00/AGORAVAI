@@ -203,6 +203,58 @@ def replace_password(db, identifier, password):
     return rotate_recovery(db, identifier)
 
 
+def structured_plaintext_counts(db):
+    """Conta endereços legíveis sem imprimir valores ou conteúdo dos relatos."""
+    counts = {}
+    for table, column in (
+        ("accounts", "email"),
+        ("tickets", "email"),
+        ("audit", "actor"),
+        ("sessions", "email"),
+        ("student_authorizations", "email"),
+    ):
+        counts[table] = db.execute(
+            "SELECT COUNT(*) FROM " + table + " WHERE instr(" + column + ", '@') > 0"
+        ).fetchone()[0]
+    return counts
+
+
+def show_email_protection(db):
+    """Exibe uma verificação do banco aberto, sem revelar endereços nem a chave."""
+    counts = structured_plaintext_counts(db)
+    invalid = 0
+    cipher = Fernet(load_data_key())
+    rows = db.execute("SELECT id,email_cipher FROM identities").fetchall()
+    for row in rows:
+        try:
+            address = cipher.decrypt(row["email_cipher"].encode()).decode()
+            if account_id(address) != row["id"]:
+                invalid += 1
+        except (InvalidToken, UnicodeError, ValueError):
+            invalid += 1
+    missing = 0
+    for table in ("accounts", "tickets", "student_authorizations"):
+        missing += db.execute(
+            "SELECT COUNT(*) FROM "
+            + table
+            + " AS item LEFT JOIN identities AS identity ON identity.id=item.email WHERE identity.id IS NULL"
+        ).fetchone()[0]
+    for table, total in counts.items():
+        print(table + " — e-mails legíveis no campo estruturado:", total)
+    print("Endereços cifrados em identities:", len(rows))
+    print("Identidades inválidas ou sem correspondência:", invalid + missing)
+    if any(counts.values()) or invalid or missing:
+        raise RuntimeError(
+            "A verificação encontrou referências de identidade inconsistentes. Preserve o banco e a chave e revise a instalação antes de continuar."
+        )
+    print(
+        "Proteção de e-mails verificada. accounts.email e tickets.email usam identificadores id:…, não endereços legíveis."
+    )
+    print(
+        "A coluna identities.email_cipher contém o endereço cifrado. Textos livres e backups antigos não são incluídos nesta verificação."
+    )
+
+
 def migrate_sensitive_data():
     """Converte as referências antigas sem trocar protocolos, senhas ou relatos."""
     with database() as db:
@@ -231,7 +283,9 @@ def migrate_sensitive_data():
             "CREATE UNIQUE INDEX IF NOT EXISTS ticket_submission ON tickets(email,submission_id) WHERE submission_id IS NOT NULL"
         )
         db.commit()
-        if marker:
+        # Uma cópia antiga do programa pode ter voltado a gravar endereços legíveis.
+        # Só repetimos a conversão quando há referências antigas, usando a mesma chave.
+        if marker and not any(structured_plaintext_counts(db).values()):
             pending = db.execute(
                 "SELECT 1 FROM auth_meta WHERE key='email_cleanup_pending'"
             ).fetchone()
@@ -243,6 +297,7 @@ def migrate_sensitive_data():
             ("accounts", "email"),
             ("tickets", "email"),
             ("audit", "actor"),
+            ("student_authorizations", "email"),
         ):
             rows = db.execute(
                 "SELECT DISTINCT " + column + " AS address FROM " + table
@@ -252,10 +307,21 @@ def migrate_sensitive_data():
                 if "@" not in email or email.startswith("id:"):
                     continue
                 identifier = ensure_identity(db, email)
-                db.execute(
-                    "UPDATE " + table + " SET " + column + "=? WHERE " + column + "=?",
-                    (identifier, email),
-                )
+                try:
+                    db.execute(
+                        "UPDATE "
+                        + table
+                        + " SET "
+                        + column
+                        + "=? WHERE "
+                        + column
+                        + "=?",
+                        (identifier, email),
+                    )
+                except sqlite3.IntegrityError:
+                    raise RuntimeError(
+                        "A conversão encontrou referências duplicadas. Nenhuma conta será mesclada automaticamente. Preserve o banco e a chave para revisar os registros."
+                    ) from None
         db.execute("DELETE FROM sessions")
         db.execute("DELETE FROM limits")
         if db.execute(
@@ -263,7 +329,7 @@ def migrate_sensitive_data():
         ).fetchone():
             db.execute("DELETE FROM codes")
         db.execute(
-            "INSERT INTO auth_meta(key,value) VALUES ('email_crypto_v1',?)",
+            "INSERT OR REPLACE INTO auth_meta(key,value) VALUES ('email_crypto_v1',?)",
             (fingerprint,),
         )
         db.execute(
@@ -1081,6 +1147,7 @@ def show_database_summary():
         ):
             count = db.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
             print(f"{description}: {count}")
+        show_email_protection(db)
     print("Consulte BANCO_DE_DADOS.md e banco.sql para entender campos e relações.")
 
 
@@ -1125,8 +1192,30 @@ def main():
         action="store_true",
         help="consultar integridade e contagens do banco",
     )
+    actions.add_argument(
+        "--criptografar",
+        action="store_true",
+        help="converter e verificar e-mails de um banco existente, preservando as contas",
+    )
     parser.add_argument("--ajuda", action="help", help="mostrar estas instruções")
     args = parser.parse_args()
+
+    if args.criptografar:
+        if not DB.is_file():
+            raise SystemExit(
+                "Banco não encontrado: "
+                + str(DB.resolve())
+                + ". Nenhum banco vazio foi criado. Confira a pasta do programa e DATABASE_PATH no .env."
+            )
+        initialize()
+        print("Banco convertido/verificado:", DB.resolve())
+        print("Chave da instalação (guarde uma cópia privada):", KEY_PATH.resolve())
+        with database() as db:
+            show_email_protection(db)
+        print(
+            "Feche e abra este mesmo arquivo novamente no DB Browser para atualizar a visualização."
+        )
+        return
 
     if args.contas:
         try:
